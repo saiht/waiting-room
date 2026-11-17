@@ -1,5 +1,7 @@
 # waiting-room
 
+![Aperçu de waiting-room : une course auto vue du cockpit, un snake et un tamagotchi dans un terminal](assets/preview.svg)
+
 De quoi patienter pendant que Claude Code travaille, dans l'esprit du petit jeu qu'on lance quand la page ne charge pas.
 
 - **Mini-jeux dans un panneau de Claude Code** : un snake, un test de vitesse de frappe, une course d'obstacles et une course auto vue du cockpit. Le panneau s'ouvre tout seul quand Claude travaille depuis un moment, et un bandeau prévient quand il a fini ou qu'il attend une réponse.
