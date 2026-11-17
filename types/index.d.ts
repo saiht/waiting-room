@@ -1,4 +1,4 @@
-export type GameId = 'snake' | 'typing' | 'pet'
+export type GameId = 'snake' | 'typing' | 'runner' | 'pet'
 
 /** Où en est Claude : au repos, au travail, ou tour terminé. */
 export type Phase = {
@@ -9,7 +9,7 @@ export type Phase = {
   at: number
 }
 
-export type Best = { snake: number; typing: number }
+export type Best = { snake: number; typing: number; runner: number }
 
 export type PetStage = 'egg' | 'baby' | 'teen' | 'adult' | 'sage'
 export type PetMood = 'happy' | 'neutral' | 'hungry' | 'sad' | 'sulking' | 'eating' | 'loved'

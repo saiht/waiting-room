@@ -42,6 +42,7 @@ type State = {
   guess: { stage: 'idle' | 'pick' | 'reveal'; side: number; at: number }
   snake: Snake
   typing: Typing
+  runner: Runner
 }
 
 const TICK_MS = 40
@@ -224,6 +225,107 @@ export function step(snake: Snake, random: () => number = Math.random): Snake {
 /** Nombre de battements entre deux pas : de 160 ms au départ à 80 ms. */
 const stepEvery = (score: number) => Math.max(2, 4 - Math.floor(score / 6))
 
+// ---------- Course ----------
+
+export type Obstacle = { x: number; w: number; h: number }
+
+export type Runner = {
+  width: number
+  /** Hauteur des pieds au-dessus du sol, en lignes. */
+  y: number
+  vy: number
+  obstacles: readonly Obstacle[]
+  distance: number
+  /** Distance restante avant le prochain obstacle. */
+  toNext: number
+  isOver: boolean
+}
+
+/** Colonne du coureur (son dessin fait 3 colonnes, on ne heurte que celle du milieu). */
+const RUNNER_X = 5
+const SCENE_ROWS = 4
+const JUMP = 1
+const GRAVITY = 0.25
+
+export const runnerScore = (runner: Runner) => Math.floor(runner.distance / 4)
+/** Cases parcourues par pas : la course accélère avec le score. */
+const runnerSpeed = (runner: Runner) => Math.min(1.8, 1 + runnerScore(runner) / 300)
+
+export function newRunner(columns: number): Runner {
+  const width = Math.max(28, Math.min(60, columns - 4))
+
+  return { width, y: 0, vy: 0, obstacles: [], distance: 0, toNext: 20, isOver: false }
+}
+
+/** Saute, s'il a les pieds au sol. */
+export function jump(runner: Runner): Runner {
+  return runner.isOver || runner.y > 0 ? runner : { ...runner, vy: JUMP }
+}
+
+export function stepRunner(runner: Runner, random: () => number = Math.random): Runner {
+  if (runner.isOver) return runner
+  const speed = runnerSpeed(runner)
+  let { y, vy } = runner
+  if (y > 0 || vy > 0) {
+    y += vy
+    vy -= GRAVITY
+    if (y <= 0) { y = 0; vy = 0 }
+  }
+  // Un obstacle touche s'il a croisé la colonne du coureur pendant ce pas, pieds trop bas.
+  const column = RUNNER_X + 1
+  const isHit = runner.obstacles.some(one =>
+    one.x - speed < column + 1 && one.x + one.w > column && y < one.h - 0.3)
+  const obstacles = runner.obstacles
+    .map(one => ({ ...one, x: one.x - speed }))
+    .filter(one => one.x + one.w > 0)
+  let toNext = runner.toNext - speed
+  if (toNext <= 0) {
+    const isTall = random() < 0.3
+    obstacles.push({ x: runner.width, h: isTall ? 2 : 1, w: !isTall && random() < 0.4 ? 2 : 1 })
+    toNext = (10 + random() * 14) * speed // toujours plus long qu'un saut
+  }
+
+  return { ...runner, y, vy, obstacles, toNext, distance: runner.distance + speed, isOver: isHit }
+}
+
+type Segment = { text: string; color: string | undefined }
+
+/** Les lignes de la scène, du ciel au sol, découpées en segments d'une même couleur. */
+export function runnerRows(runner: Runner, beat: number): Segment[][] {
+  const feet = Math.floor(runner.y)
+  const legs = runner.isOver ? '_ _' : runner.y > 0 ? '\\ /' : beat % 2 === 0 ? '/ \\' : '| |'
+  const head = runner.isOver ? '(x)' : '(•)'
+  const rows: Segment[][] = []
+  for (let level = SCENE_ROWS - 1; level >= 0; level--) {
+    const cells: { char: string; color: string | undefined }[] = []
+    for (let i = 0; i < runner.width; i++) {
+      const isStar = level === 3 ? (i + Math.floor(runner.distance / 3)) % 19 === 7
+        : level === 2 && (i * 3 + Math.floor(runner.distance / 2)) % 23 === 0
+      cells.push({ char: isStar ? '·' : ' ', color: undefined })
+    }
+    for (const one of runner.obstacles) {
+      if (level >= one.h) continue
+      for (let i = Math.floor(one.x); i < Math.floor(one.x) + one.w; i++) {
+        if (i >= 0 && i < runner.width) cells[i] = { char: '█', color: '#e5484d' }
+      }
+    }
+    const sprite = level === feet ? legs : level === feet + 1 ? head : ''
+    for (let i = 0; i < sprite.length; i++) {
+      const char = sprite[i]
+      if (char !== undefined && char !== ' ') cells[RUNNER_X + i] = { char, color: '#b6f36a' }
+    }
+    const row: Segment[] = []
+    for (const cell of cells) {
+      const last = row[row.length - 1]
+      if (last && last.color === cell.color) last.text += cell.char
+      else row.push({ text: cell.char, color: cell.color })
+    }
+    rows.push(row)
+  }
+
+  return rows
+}
+
 // ---------- Frappe ----------
 
 export function newTyping(previous = '', random: () => number = Math.random): Typing {
@@ -285,9 +387,11 @@ function currentGame(state: State, props: GameProps): GameId {
   return game === 'pet' && props.pet === null ? 'snake' : game
 }
 
-/** Tab : snake, frappe, puis le tamagotchi s'il est activé. */
+/** Tab : snake, frappe, course, puis le tamagotchi s'il est activé. */
 function nextGame(game: GameId, props: GameProps): GameId {
-  const order: GameId[] = props.pet === null ? ['snake', 'typing'] : ['snake', 'typing', 'pet']
+  const order: GameId[] = props.pet === null
+    ? ['snake', 'typing', 'runner']
+    : ['snake', 'typing', 'runner', 'pet']
 
   return order[(order.indexOf(game) + 1) % order.length] ?? 'snake'
 }
@@ -309,6 +413,7 @@ function initialState(props: GameProps): State {
     guess: { stage: 'idle', side: 0, at: 0 },
     snake: newSnake(props.columns),
     typing: newTyping(),
+    runner: newRunner(props.columns),
   }
 }
 
@@ -324,6 +429,14 @@ function onTick(surface: ClientSurface<State>): void {
     const snake = step(state.snake)
     if (snake.isOver) surface.post({ game: 'snake', score: snake.score })
     surface.setState({ ...state, snake })
+  } else if (
+    currentGame(state, latest) === 'runner' &&
+    state.isStarted && !state.isPaused && !latest.isCovered && !state.runner.isOver
+  ) {
+    if (ticks % 2 !== 0) return
+    const runner = stepRunner(state.runner)
+    if (runner.isOver) surface.post({ game: 'runner', score: runnerScore(runner) })
+    surface.setState({ ...state, runner })
   } else if (ticks % (currentGame(state, latest) === 'pet' ? 6 : 12) === 0) {
     surface.setState({ ...state }) // fait avancer les durées affichées
   }
@@ -344,6 +457,7 @@ function onKey(surface: ClientSurface<State>, event: ClientKeyEvent): void {
       isPaused: false,
       snake: newSnake(latest.columns),
       typing: newTyping(state.typing.text),
+      runner: newRunner(latest.columns),
     })
 
     return
@@ -375,6 +489,20 @@ function onKey(surface: ClientSurface<State>, event: ClientKeyEvent): void {
   }
   if (!state.isStarted) {
     if (key === ' ') surface.setState({ ...state, isStarted: true })
+
+    return
+  }
+
+  if (game === 'runner') {
+    const { runner } = state
+    const pressed = key.toLowerCase()
+    if (pressed === 'p') {
+      if (!runner.isOver) surface.setState({ ...state, isPaused: !state.isPaused })
+    } else if (pressed === 'return' || pressed === 'r') {
+      if (runner.isOver) surface.setState({ ...state, isPaused: false, runner: newRunner(latest.columns) })
+    } else if ((pressed === ' ' || pressed === 'up' || pressed === 'z' || pressed === 'w') && !state.isPaused) {
+      surface.setState({ ...state, runner: jump(runner) })
+    }
 
     return
   }
@@ -527,6 +655,33 @@ const Game: ClientModule<GameProps, State> = (props, surface) => {
         </Box>
         <Text bold>[Espace] caresser  [F] friandise  [J] jouer  [N] nettoyer</Text>
         <Text dimColor>Tab : autre jeu · Échap : sortir</Text>
+      </Box>
+    )
+  }
+
+  if (game === 'runner') {
+    const { runner } = state
+    const score = runnerScore(runner)
+    const record = Math.max(props.best.runner, runner.isOver ? score : 0)
+    const post = (i: number) => ((i + Math.floor(runner.distance)) % 8 === 0 ? '┴' : '─')
+    const ground = Array.from({ length: runner.width }, (_, i) => post(i)).join('')
+    const help = !state.isStarted ? start
+      : runner.isOver ? <Text bold>💥 Aïe ! Entrée pour repartir · Tab : autre jeu</Text>
+      : state.isPaused || props.isCovered ? <Text bold>⏸  Pause — P pour reprendre</Text>
+      : <Text dimColor>Espace ou ↑ : sauter · P : pause · Tab : autre jeu · Échap : sortir</Text>
+
+    return (
+      <Box flexDirection="column">
+        <Text>🏃 Course   Score {score}   Record {record}</Text>
+        {banner}
+        <Text>╭{'─'.repeat(runner.width)}╮</Text>
+        {runnerRows(runner, Math.floor(ticks / 4)).map(row => (
+          <Text>
+            │{row.map(one => (one.color === undefined ? one.text : <Text color={one.color}>{one.text}</Text>))}│
+          </Text>
+        ))}
+        <Text>╰{ground}╯</Text>
+        {help}
       </Box>
     )
   }

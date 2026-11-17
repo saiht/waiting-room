@@ -1,6 +1,6 @@
 import { expect, mock, test } from 'claude-code/testing'
 
-import { newSnake, step, turn, typeKey, newTyping, wordsPerMinute, wrap } from '../hooks/game'
+import { jump, newRunner, newSnake, newTyping, runnerRows, runnerScore, step, stepRunner, turn, typeKey, wordsPerMinute, wrap } from '../hooks/game'
 import { age, clean, feed, gauge, moodOf, newPet, play, restorePet, stageOf, stroke, sulk, treat, viewOf } from '../hooks/pet'
 import { formatDuration, pickDaily } from '../hooks/register'
 
@@ -309,5 +309,59 @@ test('dans le panneau : friandise, devinette et nettoyage', { options: { game: '
   await ui.key({ key: 'left' })
   await ui.redraw()
   expect(await shown(ui, /Gagné|Raté/)).toBe(true)
+  await ui.unmount()
+})
+
+test('logique de la course', () => {
+  const never = () => 0.9
+  let runner = newRunner(60)
+  expect(runner.width).toBe(56)
+
+  // un saut : il monte, redescend, et ne peut pas ressauter en l'air
+  runner = jump(runner)
+  const heights: number[] = []
+  for (let i = 0; i < 9; i++) {
+    runner = stepRunner(runner, never)
+    heights.push(runner.y)
+    if (i === 3) expect(jump(runner)).toBe(runner)
+  }
+  expect(heights).toEqual([1, 1.75, 2.25, 2.5, 2.5, 2.25, 1.75, 1, 0])
+  expect(runnerScore(runner)).toBe(2)
+
+  // un obstacle sur sa route : heurté au sol, franchi en l'air
+  const ahead = { ...newRunner(60), obstacles: [{ x: 7, w: 1, h: 1 }] }
+  expect(stepRunner(ahead, never).isOver).toBe(true)
+  expect(stepRunner({ ...ahead, y: 1.75, vy: 0.25 }, never).isOver).toBe(false)
+  // un obstacle haut demande d'être au sommet du saut
+  const tall = { ...newRunner(60), obstacles: [{ x: 7, w: 1, h: 2 }] }
+  expect(stepRunner({ ...tall, y: 0.5, vy: 0.5 }, never).isOver).toBe(true)
+  expect(stepRunner({ ...tall, y: 1.75, vy: 0.5 }, never).isOver).toBe(false)
+
+  // les obstacles arrivent par la droite, et la scène montre le coureur
+  let long = newRunner(60)
+  for (let i = 0; i < 21; i++) long = stepRunner(long, never)
+  expect(long.obstacles.length).toBe(1)
+  const drawn = (r: typeof long) => runnerRows(r, 0).map(row => row.map(one => one.text).join('')).join('\n')
+  expect(drawn(long)).toContain('(•)')
+  expect(drawn(long)).toContain('█')
+  expect(drawn({ ...long, isOver: true })).toContain('(x)')
+  expect(runnerRows(long, 0).every(row => row.map(one => one.text).join('').length === 56)).toBe(true)
+})
+
+test('course : Espace démarre puis fait sauter ; sans sauter, on finit dans un obstacle', { options: { game: 'runner' } }, async ($, on) => {
+  mock.clock(on)
+  mock.store(on)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await shown(ui, /Course/)).toBe(true)
+  expect(await shown(ui, /Espace pour démarrer/)).toBe(true)
+  await ui.advance(10000)
+  expect(await shown(ui, /Aïe/)).toBe(false)
+
+  await ui.key({ key: ' ' })
+  expect(await shown(ui, /sauter/)).toBe(true)
+  await ui.advance(15000)
+  expect(await shown(ui, /Aïe/)).toBe(true)
+  await ui.key({ key: 'return' })
+  expect(await shown(ui, /sauter/)).toBe(true)
   await ui.unmount()
 })

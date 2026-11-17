@@ -2,7 +2,7 @@
 
 De quoi patienter pendant que Claude Code travaille, dans l'esprit du petit jeu qu'on lance quand la page ne charge pas.
 
-- **Mini-jeux dans un panneau de Claude Code** : un snake et un test de vitesse de frappe. Le panneau s'ouvre tout seul quand Claude travaille depuis un moment, et un bandeau prévient quand il a fini ou qu'il attend une réponse.
+- **Mini-jeux dans un panneau de Claude Code** : un snake, un test de vitesse de frappe et une course d'obstacles. Le panneau s'ouvre tout seul quand Claude travaille depuis un moment, et un bandeau prévient quand il a fini ou qu'il attend une réponse.
 - **Un tamagotchi dans la barre de statut** : il mange les tâches que Claude termine, grandit, a faim quand tu t'absentes et boude quand tu laisses Claude attendre une permission.
 - **Animation dans la barre de statut** : un petit coureur, une vague ou un serpent pendant le travail, avec le temps écoulé.
 - **Paramétrable** depuis `/config` : jeu et animation fixes ou tirés au sort chaque jour, délai avant l'ouverture du jeu, fermeture automatique.
@@ -35,10 +35,11 @@ Lance une tâche. Au bout du délai réglé (5 secondes par défaut), le panneau
 
 | Touche | Action |
 | --- | --- |
-| `Espace` | démarrer, puis mettre en pause (snake) |
+| `Espace` | démarrer, puis mettre en pause (snake) ou sauter (course) |
 | flèches ou `ZQSD` / `WASD` | diriger le serpent |
 | `Entrée` | rejouer / phrase suivante |
-| `Tab` | passer au jeu suivant (snake, frappe, tamagotchi) |
+| `P` | mettre la course en pause |
+| `Tab` | passer au jeu suivant (snake, frappe, course, tamagotchi) |
 | `Échap` | rendre le clavier à Claude |
 
 Si Claude ouvre une boîte de dialogue (permission, question), le snake se met en pause et le bandeau l'indique.
@@ -50,6 +51,7 @@ Si Claude ouvre une boîte de dialogue (permission, question), le snake se met e
 | `/waiting` | ouvre le panneau avec le jeu du moment, même si Claude ne travaille pas |
 | `/waiting snake` | ouvre le snake, et le garde pour la session |
 | `/waiting typing` | ouvre le test de frappe, et le garde pour la session |
+| `/waiting runner` | ouvre la course d'obstacles, et la garde pour la session |
 | `/waiting pet` | ouvre la vue du tamagotchi |
 | `/waiting close` | ferme le panneau |
 
@@ -98,7 +100,7 @@ Dans `/config`, section du mod :
 
 | Réglage | Valeurs | Défaut |
 | --- | --- | --- |
-| **Jeu** | `random-daily` (tirage du jour entre snake et frappe), `snake`, `typing`, `pet`, `off` | `random-daily` |
+| **Jeu** | `random-daily` (tirage du jour entre snake, frappe et course), `snake`, `typing`, `runner`, `pet`, `off` | `random-daily` |
 | **Délai avant le jeu (secondes)** | un nombre | `5` |
 | **Animation de la barre de statut** | `random-daily`, `runner`, `wave`, `serpent`, `off` | `random-daily` |
 | **Fermer le jeu quand Claude a fini** | oui / non | non |
@@ -154,7 +156,6 @@ Ajouter un jeu au mod : sa logique et son dessin dans `hooks/game.tsx`, son iden
 - **Le pari** : parier sur la durée ou le nombre d'outils que Claude va utiliser, score à la fin.
 - **Snake alimenté par l'agent** : chaque appel d'outil fait apparaître une pomme, chaque erreur un obstacle.
 - **Bingo** : une grille de cases (« lance les tests », « se trompe de chemin », « modifie 3 fichiers ») qui se cochent toutes seules.
-- **Coureur à obstacles** à une touche, avec un personnage original.
 - **Démineur** et **jeu de fusion de tuiles**, au tour par tour.
 - **Question du moment** : quiz ou flashcard (raccourcis, git, culture dev) à chaque attente.
 - **Messages d'attente personnalisés** à la place des verbes du spinner.
