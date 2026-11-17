@@ -1,7 +1,7 @@
 {
   "name": "waiting-room",
-  "version": "0.2.0",
-  "description": "De quoi patienter pendant que Claude travaille : mini-jeux dans un panneau et animation dans la barre de statut.",
+  "version": "0.3.0",
+  "description": "De quoi patienter pendant que Claude travaille : mini-jeux, tamagotchi et animation dans la barre de statut.",
   "author": {
     "name": "Saiht"
   },
@@ -11,11 +11,12 @@
     "game": {
       "type": "string",
       "title": "Jeu",
-      "description": "Jeu proposé pendant l'attente : un jeu fixe, un tirage au sort par jour, ou aucun.",
+      "description": "Ce qui s'ouvre pendant l'attente : un jeu fixe, un tirage au sort par jour (snake ou frappe), le tamagotchi, ou rien.",
       "options": [
         "random-daily",
         "snake",
         "typing",
+        "pet",
         "off"
       ],
       "default": "random-daily"
@@ -44,6 +45,18 @@
       "title": "Fermer le jeu quand Claude a fini",
       "description": "Ferme le panneau de jeu dès que Claude a terminé, au lieu de te laisser finir ta partie.",
       "default": false
+    },
+    "pet": {
+      "type": "boolean",
+      "title": "Tamagotchi",
+      "description": "Une créature dans la barre de statut : elle mange les tâches que Claude termine et boude quand tu le laisses attendre une permission.",
+      "default": true
+    },
+    "petName": {
+      "type": "string",
+      "title": "Nom du tamagotchi",
+      "description": "Le nom affiché à côté de ta créature.",
+      "default": "Mochi"
     }
   }
 }

@@ -1,6 +1,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 
 import { newSnake, step, turn, typeKey, newTyping, wordsPerMinute, wrap } from '../hooks/game'
+import { age, feed, gauge, moodOf, newPet, restorePet, stageOf, stroke, sulk, viewOf } from '../hooks/pet'
 import { formatDuration, pickDaily } from '../hooks/register'
 
 const PANE = {
@@ -151,4 +152,100 @@ test('tirage du jour et durées', () => {
   for (let d = 1; d <= 28; d++) seen.add(pickDaily(list, 'x', new Date(2026, 10, d).getTime()))
   expect([...seen].sort()).toEqual(list)
   expect(formatDuration(83000)).toBe('1m23')
+})
+
+test('tamagotchi : repas, faim, bouderie, caresse', () => {
+  const t0 = 1_000_000
+  const egg = newPet(t0)
+  expect(stageOf(egg.xp).stage).toBe('egg')
+
+  const pet = feed(egg, t0, 5)
+  expect(stageOf(pet.xp).stage).toBe('baby')
+  expect([pet.words, pet.meals]).toEqual(['Il a éclos !', 1])
+  expect(moodOf(pet, t0 + 1000)).toBe('eating')
+  expect(viewOf(pet, 'Mochi', t0 + 20000).face).toBe('(•ᴗ•)')
+
+  const later = t0 + 20 * 3_600_000
+  const hungry = age(pet, later)
+  expect(hungry.satiety).toBe(0)
+  expect(moodOf(hungry, later)).toBe('hungry')
+
+  const sulky = sulk(pet, t0 + 60000, 95000)
+  expect(moodOf(sulky, t0 + 70000)).toBe('sulking')
+  expect(sulky.words).toBe('Hmpf. Claude t\'a attendu 1 min.')
+  expect(sulky.happiness).toBe(pet.happiness - 15)
+
+  const forgiven = stroke(sulky, t0 + 80000)
+  expect([forgiven.sulkUntil, forgiven.words]).toEqual([0, 'Bon… pardonné.'])
+  expect(moodOf(forgiven, t0 + 81000)).toBe('loved')
+  expect(stroke(forgiven, t0 + 81000).happiness).toBe(forgiven.happiness) // trop tôt pour compter
+  expect(feed(sulky, t0 + 90000, 0).sulkUntil).toBe(0) // un repas, et c'est oublié
+
+  expect(restorePet({ ...pet }, later)).toEqual(pet)
+  expect(restorePet({ ...pet, xp: 'beaucoup' }, later).xp).toBe(0)
+  expect(restorePet(undefined, later).bornAt).toBe(later)
+  expect(gauge(60)).toBe('▰▰▰▱▱')
+})
+
+test('une tâche terminée nourrit le tamagotchi ; faire attendre Claude le fait bouder', { options: { game: 'off', animation: 'off' } }, async ($, on) => {
+  const clock = mock.clock(on, { now: 1_000_000 })
+  mock.store(on)
+  const statuses: string[] = []
+  const toasts: string[] = []
+  on('ui.status', (_, e) => {
+    statuses.push(e.text ?? '')
+
+    return { value: undefined }
+  })
+  on('ui.toast', (_, e) => {
+    toasts.push(e.text)
+
+    return { value: undefined }
+  })
+  on('command.register', () => ({ value: { command: 'waiting' } }))
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+  on('turn.start', (_, e) => ({ turnId: e.turnId }))
+  on('turn.complete', () => ({ text: 'fait' }))
+  on('classic.Notification', () => ({}))
+
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  expect(statuses.at(-1)).toContain('Mochi')
+
+  await $.turn.start({ text: 'salut', turnId: 't1' })
+  await $.classic.Notification({ message: 'Autoriser ?', notification_type: 'permission_prompt' })
+  await clock.advance(45000)
+  expect(statuses.some(s => s.includes('Claude t\'attend'))).toBe(true)
+
+  await $.turn.complete({ answer: 'fait', durationMs: 45000, isAborted: false, turnId: 't1', reason: 'answer' })
+  expect(toasts.some(t => t.includes('Mochi boude'))).toBe(true)
+  expect(statuses.at(-1)).toContain('L\'œuf a bougé')
+})
+
+test('le tamagotchi se caresse dans le panneau, et se désactive', { options: { game: 'pet' } }, async ($, on) => {
+  mock.clock(on, { now: 1_000_000 })
+  mock.store(on)
+  on('ui.status', () => ({ value: undefined }))
+  on('command.register', () => ({ value: { command: 'waiting' } }))
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await shown(ui, /Mochi/)).toBe(true)
+  expect(await shown(ui, /Un œuf/)).toBe(true)
+  await ui.key({ key: ' ' })
+  await ui.redraw()
+  expect(await shown(ui, /Rrrr/)).toBe(true)
+  await ui.key({ key: 'tab' })
+  expect(await shown(ui, /Snake/)).toBe(true)
+  await ui.unmount()
+})
+
+test('tamagotchi désactivé : pas de vue dans le panneau, ni dans le cycle de Tab', { options: { game: 'pet', pet: false } }, async ($, on) => {
+  mock.clock(on)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await shown(ui, /Mochi/)).toBe(false)
+  await ui.key({ key: 'tab' })
+  await ui.key({ key: 'tab' })
+  expect(await shown(ui, /Mochi/)).toBe(false)
+  await ui.unmount()
 })

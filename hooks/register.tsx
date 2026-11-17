@@ -1,10 +1,12 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, Timer } from 'claude-code'
 
-import type { Best, GameId, GameProps, Phase } from '../types'
+import type { Best, GameId, GameProps, Pet, Phase } from '../types'
+import { SULK_AFTER_MS, age, feed, newPet, restorePet, stageOf, statusOf, stroke, sulk, viewOf } from './pet'
 
 const PANE = 'waiting-room'
-const GAMES: readonly GameId[] = ['snake', 'typing']
+/** Les jeux du tirage du jour ; le tamagotchi s'ouvre à la demande ou avec Tab. */
+const DAILY_GAMES: readonly GameId[] = ['snake', 'typing']
 const TRACK = 16
 
 const phase = atom(
@@ -18,6 +20,8 @@ const best = atom(
   { snake: 0, typing: 0 } as Best,
   { shape: 'best-1' },
 )
+// bornAt à 0 : pas encore chargé depuis le stockage.
+const petAtom = atom({ plugin: 'waiting-room', key: 'pet' } as const, newPet(0), { shape: 'pet-1' })
 
 const ANIMATIONS: Record<string, (t: number) => string> = {
   runner(t) {
@@ -57,15 +61,47 @@ export function formatDuration(ms: number): string {
   return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m${String(s % 60).padStart(2, '0')}`
 }
 
-const isGame = (value: unknown): value is GameId => value === 'snake' || value === 'typing'
+const isGame = (value: unknown): value is GameId =>
+  value === 'snake' || value === 'typing' || value === 'pet'
 
-let hasHinted = false
+// Ce que les minuteurs lisent sans attendre : repart de zéro à chaque rechargement,
+// puis `session.start` le remplit.
+const live = {
+  pet: undefined as Pet | undefined,
+  petName: 'Mochi',
+  isPetOn: true,
+  /** Outils utilisés pendant le tour en cours. */
+  tools: 0,
+  /** Depuis quand Claude attend une permission (0 : il n'attend pas). */
+  waitingSince: 0,
+  hasHinted: false,
+}
 
 async function openPane($: EngineInterface, isAsked: boolean): Promise<void> {
-  const opened = await $.ui.open({ id: PANE, title: 'En attendant Claude', rows: 17, columns: 56 })
-  if (!opened.isPlaced && !isAsked && !hasHinted) {
-    hasHinted = true
+  // Le clavier est demandé pour le panneau ; Claude Code ne l'accorde que si le prompt est vide.
+  const opened = await $.ui.open({ id: PANE, title: 'En attendant Claude', focus: true, rows: 17, columns: 56 })
+  if (!opened.isPlaced && !isAsked && !live.hasHinted) {
+    live.hasHinted = true
     $.ui.toast('🎮 Tape /waiting pour jouer en attendant Claude')
+  }
+}
+
+async function savePet($: EngineInterface, pet: Pet): Promise<void> {
+  live.pet = pet
+  await update($, petAtom, () => pet)
+  await $.store.set('pet', pet)
+}
+
+/** Claude n'attend plus : s'il a attendu trop longtemps, le tamagotchi boude. */
+async function settleWait($: EngineInterface): Promise<void> {
+  if (live.waitingSince === 0) return
+  const now = await $.clock.now()
+  const waited = now - live.waitingSince
+  live.waitingSince = 0
+  if (live.isPetOn && live.pet && waited > SULK_AFTER_MS) {
+    const sulky = sulk(live.pet, now, waited)
+    await savePet($, sulky)
+    $.ui.toast(`${viewOf(sulky, live.petName, now).face} ${live.petName} boude. ${sulky.words}`)
   }
 }
 
@@ -74,6 +110,8 @@ export const register: Register = (on, options) => {
   const animationOption = String(options.animation ?? 'random-daily')
   const delayMs = Math.max(0, Number(options.delaySeconds ?? 5) || 0) * 1000
   const closeWhenDone = options.closeWhenDone === true
+  live.isPetOn = options.pet !== false
+  live.petName = String(options.petName ?? '').trim().slice(0, 20) || 'Mochi'
 
   let ticker: Timer | undefined
   let opener: Timer | undefined
@@ -89,14 +127,20 @@ export const register: Register = (on, options) => {
   on('session.start', async ($, e, next) => {
     await $.command.register({
       name: 'waiting',
-      description: 'Ouvre un mini-jeu pour patienter pendant que Claude travaille',
-      argumentHint: '[snake|typing|close]',
+      description: 'Ouvre un mini-jeu ou le tamagotchi pour patienter pendant que Claude travaille',
+      argumentHint: '[snake|typing|pet|close]',
       immediate: true,
     })
     const stored = (await $.store.get('best')) as Partial<Best> | undefined
     if (stored) {
       const kept: Best = { snake: Number(stored.snake) || 0, typing: Number(stored.typing) || 0 }
       await update($, best, () => kept)
+    }
+    if (live.isPetOn) {
+      const now = await $.clock.now()
+      const pet = age(restorePet(await $.store.get('pet'), now), now)
+      await savePet($, pet)
+      $.ui.status(statusOf(viewOf(pet, live.petName, now)))
     }
 
     return next(e)
@@ -107,16 +151,25 @@ export const register: Register = (on, options) => {
       const now = await $.clock.now()
       await update($, phase, (): Phase => ({ state: 'working', since: now, at: 0 }))
       stopTimers()
+      live.tools = 0
+      live.waitingSince = 0
 
       const name = ANIMATIONS[animationOption]
         ? animationOption
         : pickDaily(Object.keys(ANIMATIONS), 'animation', now)
-      const frame = name === undefined ? undefined : ANIMATIONS[name]
-      if (animationOption !== 'off' && frame) {
+      const frame = animationOption === 'off' || name === undefined ? undefined : ANIMATIONS[name]
+      if (frame || live.isPetOn) {
         let t = 0
         ticker = $.clock.every(500, () => {
           t += 1
-          $.ui.status(`${frame(t)} ${formatDuration(t * 500)}`)
+          const elapsed = t * 500
+          const at = now + elapsed
+          const isImpatient = live.waitingSince !== 0 && at - live.waitingSince > SULK_AFTER_MS
+          const face = live.isPetOn && live.pet
+            ? `${viewOf(live.pet, live.petName, at, isImpatient ? 'sulking' : undefined).face} `
+            : ''
+          const middle = isImpatient ? 'Claude t\'attend… ' : frame ? `${frame(t)} ` : ''
+          $.ui.status(`${face}${middle}${formatDuration(elapsed)}`)
         })
       }
       if (gameOption !== 'off') {
@@ -127,12 +180,41 @@ export const register: Register = (on, options) => {
     return next(e)
   })
 
+  // Une demande de permission : on note depuis quand Claude attend.
+  on('classic.Notification', async ($, e, next) => {
+    if (e.notification_type === 'permission_prompt' && live.waitingSince === 0) {
+      live.waitingSince = await $.clock.now()
+    }
+
+    return next(e)
+  })
+
+  // Un outil a tourné : la permission a donc été donnée.
+  on('classic.PostToolUse', async ($, e, next) => {
+    live.tools += 1
+    await settleWait($)
+
+    return next(e)
+  })
+
   on('turn.complete', async ($, e, next) => {
     if (e.agentId === undefined) {
+      await settleWait($)
       stopTimers()
       const now = await $.clock.now()
       await update($, phase, (held): Phase => ({ state: 'done', since: held.since, at: now }))
-      if (animationOption !== 'off') {
+
+      if (live.isPetOn && live.pet) {
+        const before = stageOf(live.pet.xp).stage
+        const fed = feed(live.pet, now, live.tools)
+        await savePet($, fed)
+        const view = viewOf(fed, live.petName, now)
+        if (view.stage !== before) $.ui.toast(`${view.face} ${live.petName} : ${fed.words}`)
+        $.ui.status(`${view.face} ${live.petName} · ${fed.words}`)
+        clearer = $.clock.after(15000, () => {
+          if (live.pet) $.ui.status(statusOf(viewOf(live.pet, live.petName, now + 15000)))
+        })
+      } else if (animationOption !== 'off') {
         $.ui.status(`(ᴗ˳ᴗ) zZ  fini en ${formatDuration(e.durationMs)}`)
         clearer = $.clock.after(15000, () => $.ui.status(undefined))
       }
@@ -150,12 +232,15 @@ export const register: Register = (on, options) => {
       return { text: 'Panneau de jeu fermé.' }
     }
     if (arg !== '' && !isGame(arg)) {
-      return { text: `Jeu inconnu : ${arg}. Choix possibles : snake, typing, close.` }
+      return { text: `Jeu inconnu : ${arg}. Choix possibles : snake, typing, pet, close.` }
+    }
+    if (arg === 'pet' && !live.isPetOn) {
+      return { text: 'Le tamagotchi est désactivé : réactive-le dans /config.' }
     }
     if (isGame(arg)) await update($, chosen, () => arg)
     await openPane($, true)
 
-    return { text: 'Jeu ouvert : clique dedans pour jouer, Échap pour rendre le clavier à Claude.' }
+    return { text: 'Panneau ouvert : clique dedans pour jouer, Échap pour rendre le clavier à Claude.' }
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
@@ -165,12 +250,17 @@ export const register: Register = (on, options) => {
       return <Text dimColor>Les mini-jeux se jouent dans le terminal ou l'app desktop.</Text>
     }
     const { Client } = $.ui.resolve(e)
+    const now = await $.clock.now()
     const picked = await read($, chosen)
-    const daily = pickDaily(GAMES, 'game', await $.clock.now()) ?? 'snake'
+    const pet = await read($, petAtom)
+    const hasPet = live.isPetOn && pet.bornAt !== 0
+    const daily = pickDaily(DAILY_GAMES, 'game', now) ?? 'snake'
+    const wanted = isGame(picked) ? picked : isGame(gameOption) ? gameOption : daily
     const props: GameProps = {
-      game: isGame(picked) ? picked : isGame(gameOption) ? gameOption : daily,
+      game: wanted === 'pet' && !hasPet ? daily : wanted,
       phase: await read($, phase),
       best: await read($, best),
+      pet: hasPet ? viewOf(pet, live.petName, now) : null,
       isCovered: e.props.isPromptCovered === true,
       columns: e.props.bodyColumns,
     }
@@ -178,16 +268,26 @@ export const register: Register = (on, options) => {
     return <Client key="game" module="./game.tsx" props={props} />
   })
 
-  // Le jeu annonce un score : on garde le record, dans la session et au-delà.
+  // Le panneau parle au module : un score à garder, ou une caresse.
   on('ui.message', async ($, e, next) => {
-    const data = e.data as { game?: unknown; score?: unknown } | null
-    if (e.requestId === PANE && data && isGame(data.game) && typeof data.score === 'number') {
+    const data = e.data as { game?: unknown; score?: unknown; pet?: unknown } | null
+    if (e.requestId !== PANE || !data) return next(e)
+
+    if ((data.game === 'snake' || data.game === 'typing') && typeof data.score === 'number') {
       const score = Math.round(data.score)
       const held = await read($, best)
       if (Number.isFinite(score) && score > held[data.game] && score < 100000) {
         const record: Best = { ...held, [data.game]: score }
         await update($, best, () => record)
         await $.store.set('best', record)
+      }
+    }
+    if (data.pet === 'stroke' && live.isPetOn && live.pet) {
+      const now = await $.clock.now()
+      const stroked = stroke(live.pet, now)
+      await savePet($, stroked)
+      if ((await read($, phase)).state !== 'working') {
+        $.ui.status(statusOf(viewOf(stroked, live.petName, now)))
       }
     }
 

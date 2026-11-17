@@ -36,6 +36,8 @@ type State = {
   /** Rien ne bouge avant qu'on appuie sur Espace. */
   isStarted: boolean
   isPaused: boolean
+  /** Battement de la dernière caresse au tamagotchi (0 : aucune). */
+  heartsAt: number
   snake: Snake
   typing: Typing
 }
@@ -199,8 +201,25 @@ function formatDuration(ms: number): string {
   return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m${String(s % 60).padStart(2, '0')}`
 }
 
-const currentGame = (state: State, props: GameProps): GameId =>
-  state.override !== null && state.overrideFor === props.game ? state.override : props.game
+function currentGame(state: State, props: GameProps): GameId {
+  const game = state.override !== null && state.overrideFor === props.game ? state.override : props.game
+
+  return game === 'pet' && props.pet === null ? 'snake' : game
+}
+
+/** Tab : snake, frappe, puis le tamagotchi s'il est activé. */
+function nextGame(game: GameId, props: GameProps): GameId {
+  const order: GameId[] = props.pet === null ? ['snake', 'typing'] : ['snake', 'typing', 'pet']
+
+  return order[(order.indexOf(game) + 1) % order.length] ?? 'snake'
+}
+
+/** Jauge de 5 crans pour une valeur de 0 à 100. */
+const gauge = (value: number) => {
+  const filled = Math.round(Math.max(0, Math.min(100, value)) / 20)
+
+  return '▰'.repeat(filled) + '▱'.repeat(5 - filled)
+}
 
 function initialState(props: GameProps): State {
   return {
@@ -208,6 +227,7 @@ function initialState(props: GameProps): State {
     overrideFor: props.game,
     isStarted: false,
     isPaused: false,
+    heartsAt: 0,
     snake: newSnake(props.columns),
     typing: newTyping(),
   }
@@ -239,13 +259,21 @@ function onKey(surface: ClientSurface<State>, event: ClientKeyEvent): void {
   if (key === 'tab') {
     surface.setState({
       ...state,
-      override: game === 'snake' ? 'typing' : 'snake',
+      override: nextGame(game, latest),
       overrideFor: latest.game,
       isStarted: false,
       isPaused: false,
       snake: newSnake(latest.columns),
       typing: newTyping(state.typing.text),
     })
+
+    return
+  }
+  if (game === 'pet') {
+    if (key === ' ' || key === 'c') {
+      surface.post({ pet: 'stroke' })
+      surface.setState({ ...state, heartsAt: ticks })
+    }
 
     return
   }
@@ -307,7 +335,27 @@ const Game: ClientModule<GameProps, State> = (props, surface) => {
   ) : (
     <Text dimColor>mode libre</Text>
   )
-  const start = <Text bold>▶ Clique ici, puis Espace pour démarrer · Tab : autre jeu</Text>
+  const start = <Text bold>▶ Espace pour démarrer · Tab : autre jeu (clique ici si rien ne répond)</Text>
+
+  if (game === 'pet' && props.pet !== null) {
+    const pet = props.pet
+    const hasHearts = state.heartsAt !== 0 && ticks - state.heartsAt < 40
+
+    return (
+      <Box flexDirection="column">
+        <Text>🐣 {pet.name}   {pet.stageLabel} · {pet.ageDays} j · {pet.meals} repas</Text>
+        {banner}
+        <Box flexDirection="column" borderStyle="round" paddingX={2} paddingY={1} width={Math.min(Math.max(24, props.columns), 46)}>
+          <Text bold>{hasHearts ? `♥ ${pet.face} ♥` : pet.face}</Text>
+          <Text dimColor>« {pet.words} »</Text>
+        </Box>
+        <Text>faim    {gauge(pet.satiety)} {pet.satiety} %</Text>
+        <Text>humeur  {gauge(pet.happiness)} {pet.happiness} %</Text>
+        <Text>xp      {pet.xp}{pet.nextXp === null ? '' : ` / ${pet.nextXp}`}</Text>
+        <Text dimColor>Espace : caresser · Tab : autre jeu · Échap : sortir</Text>
+      </Box>
+    )
+  }
 
   if (game === 'snake') {
     const { snake } = state

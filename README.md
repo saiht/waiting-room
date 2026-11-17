@@ -3,6 +3,7 @@
 De quoi patienter pendant que Claude Code travaille, dans l'esprit du petit jeu qu'on lance quand la page ne charge pas.
 
 - **Mini-jeux dans un panneau de Claude Code** : un snake et un test de vitesse de frappe. Le panneau s'ouvre tout seul quand Claude travaille depuis un moment, et un bandeau prévient quand il a fini ou qu'il attend une réponse.
+- **Un tamagotchi dans la barre de statut** : il mange les tâches que Claude termine, grandit, a faim quand tu t'absentes et boude quand tu laisses Claude attendre une permission.
 - **Animation dans la barre de statut** : un petit coureur, une vague ou un serpent pendant le travail, avec le temps écoulé.
 - **Paramétrable** depuis `/config` : jeu et animation fixes ou tirés au sort chaque jour, délai avant l'ouverture du jeu, fermeture automatique.
 
@@ -28,7 +29,7 @@ Le mod s'appuie sur l'API des mods de Claude Code, encore en accès anticipé : 
 
 Lance une tâche. Au bout du délai réglé (5 secondes par défaut), le panneau de jeu s'ouvre.
 
-1. **Clique dans le jeu** pour lui donner le clavier.
+1. Le panneau demande le clavier à son ouverture. Claude Code ne le lui donne que si ton prompt est vide ; si le jeu ne répond pas, **clique dedans**.
 2. **Espace** pour démarrer : rien ne bouge avant.
 3. **Échap** rend le clavier à Claude. Le panneau reste ouvert, tu peux y revenir d'un clic.
 
@@ -37,7 +38,7 @@ Lance une tâche. Au bout du délai réglé (5 secondes par défaut), le panneau
 | `Espace` | démarrer, puis mettre en pause (snake) |
 | flèches ou `ZQSD` / `WASD` | diriger le serpent |
 | `Entrée` | rejouer / phrase suivante |
-| `Tab` | passer à l'autre jeu |
+| `Tab` | passer au jeu suivant (snake, frappe, tamagotchi) |
 | `Échap` | rendre le clavier à Claude |
 
 Si Claude ouvre une boîte de dialogue (permission, question), le snake se met en pause et le bandeau l'indique.
@@ -49,9 +50,25 @@ Si Claude ouvre une boîte de dialogue (permission, question), le snake se met e
 | `/waiting` | ouvre le panneau avec le jeu du moment, même si Claude ne travaille pas |
 | `/waiting snake` | ouvre le snake, et le garde pour la session |
 | `/waiting typing` | ouvre le test de frappe, et le garde pour la session |
+| `/waiting pet` | ouvre la vue du tamagotchi |
 | `/waiting close` | ferme le panneau |
 
 Sur un terminal étroit (moins de 144 colonnes), Claude Code n'ouvre pas de panneau sans qu'on le demande : un message te propose alors `/waiting`, qui l'ouvre à n'importe quelle largeur.
+
+## Le tamagotchi
+
+Il vit dans la barre de statut, sous le prompt, et se garde d'une session à l'autre.
+
+| Ce qui se passe | Effet |
+| --- | --- |
+| Claude termine une tâche | un repas : la faim baisse, l'humeur monte, il gagne de l'expérience (plus Claude a utilisé d'outils, plus le repas est copieux) |
+| Le temps passe | la faim revient, en 17 heures environ ; affamé, il s'attriste |
+| Claude attend une permission plus de 30 secondes | il boude pendant 10 minutes et perd de l'humeur |
+| Tu le caresses (`Espace` dans sa vue) | l'humeur remonte, et il pardonne |
+
+Il commence en œuf, éclot après quelques tâches, puis grandit : bébé, ado, adulte, sage. Il ne meurt pas.
+
+`/waiting pet` (ou `Tab` depuis un jeu) ouvre sa vue : son visage, sa dernière réplique, ses jauges de faim et d'humeur, son expérience.
 
 ## Réglages
 
@@ -59,10 +76,12 @@ Dans `/config`, section du mod :
 
 | Réglage | Valeurs | Défaut |
 | --- | --- | --- |
-| **Jeu** | `random-daily` (tirage du jour), `snake`, `typing`, `off` | `random-daily` |
+| **Jeu** | `random-daily` (tirage du jour entre snake et frappe), `snake`, `typing`, `pet`, `off` | `random-daily` |
 | **Délai avant le jeu (secondes)** | un nombre | `5` |
 | **Animation de la barre de statut** | `random-daily`, `runner`, `wave`, `serpent`, `off` | `random-daily` |
 | **Fermer le jeu quand Claude a fini** | oui / non | non |
+| **Tamagotchi** | oui / non | oui |
+| **Nom du tamagotchi** | un texte | `Mochi` |
 
 Quelques réglages types :
 
@@ -92,7 +111,8 @@ N'active pas les deux versions en même temps : elles feraient doublon.
 ```
 .claude-plugin/   manifeste du mod (réglages) et fichier marketplace
 hooks/register.tsx  événements de Claude Code : tours, commande, barre de statut, panneau
-hooks/game.tsx      les jeux, dessinés et joués dans le panneau
+hooks/game.tsx      les jeux et la vue du tamagotchi, dessinés dans le panneau
+hooks/pet.ts        la logique du tamagotchi
 types/            contrat des valeurs d'état
 tests/            tests du mod
 standalone/       version autonome et ses tests
@@ -109,7 +129,6 @@ Ajouter un jeu au mod : sa logique et son dessin dans `hooks/game.tsx`, son iden
 
 ## Idées pour la suite
 
-- **Tamagotchi** (le prochain) : une bestiole qui se nourrit des tâches terminées et boude quand on laisse Claude attendre une permission.
 - **Le pari** : parier sur la durée ou le nombre d'outils que Claude va utiliser, score à la fin.
 - **Snake alimenté par l'agent** : chaque appel d'outil fait apparaître une pomme, chaque erreur un obstacle.
 - **Bingo** : une grille de cases (« lance les tests », « se trompe de chemin », « modifie 3 fichiers ») qui se cochent toutes seules.
