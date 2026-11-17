@@ -27,8 +27,13 @@ export type Pet = {
   happiness: number
   /** Il boude jusqu'à cet instant (0 : il ne boude pas). */
   sulkUntil: number
+  /** Friandises en réserve : Claude en rapporte une par tâche. */
+  cookies: number
+  /** Bugs qu'il a laissés et qui attendent d'être nettoyés. */
+  bugs: number
   lastMealAt: number
   lastStrokeAt: number
+  lastPlayAt: number
   /** Sa dernière réplique. */
   words: string
 }
@@ -40,12 +45,16 @@ export type PetView = {
   stageLabel: string
   mood: PetMood
   face: string
+  /** Les yeux et la bouche seuls, pour le dessin en grand. */
+  expression: string
   satiety: number
   happiness: number
   xp: number
   /** Expérience du prochain stade ; null au dernier. */
   nextXp: number | null
   meals: number
+  cookies: number
+  bugs: number
   ageDays: number
   words: string
 }

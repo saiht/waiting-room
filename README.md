@@ -64,11 +64,33 @@ Il vit dans la barre de statut, sous le prompt, et se garde d'une session à l'a
 | Claude termine une tâche | un repas : la faim baisse, l'humeur monte, il gagne de l'expérience (plus Claude a utilisé d'outils, plus le repas est copieux) |
 | Le temps passe | la faim revient, en 17 heures environ ; affamé, il s'attriste |
 | Une boîte de dialogue de Claude (permission, question) attend plus de 30 secondes | il boude pendant 10 minutes et perd de l'humeur |
-| Tu le caresses (`Espace` dans sa vue) | l'humeur remonte, et il pardonne |
 
 Il commence en œuf, éclot après quelques tâches, puis grandit : bébé, ado, adulte, sage. Il ne meurt pas.
 
-`/waiting pet` (ou `Tab` depuis un jeu) ouvre sa vue : son visage, sa dernière réplique, ses jauges de faim et d'humeur, son expérience.
+### Sa vue dans le panneau
+
+`/waiting pet` (ou `Tab` depuis un jeu) l'ouvre : il y est dessiné en grand, il cligne des yeux, sautille quand il est content, tremble quand il a faim.
+
+```
+╭────────────────────────────────────────────╮
+│              ♥       ♥                     │
+│                .-----.                     │
+│               (  ♥ᴗ♥  )                    │
+│                `-----'                     │
+│                 U   U                      │
+│  🐛                               🍪 × 3   │
+╰────────────────────────────────────────────╯
+« Rrrr… »
+faim ▰▰▰▰▱ 78 %   humeur ▰▰▰▰▰ 92 %
+[Espace] caresser  [F] friandise  [J] jouer  [N] nettoyer
+```
+
+| Touche | Action |
+| --- | --- |
+| `Espace` | le caresser : l'humeur remonte, et il pardonne s'il boudait |
+| `F` | lui donner un cookie. Claude en rapporte un par tâche terminée, cinq au plus en réserve |
+| `J` | jouer : il cache un cookie dans une main, devine laquelle avec `←` ou `→` |
+| `N` | nettoyer : un repas sur quatre, il laisse un bug derrière lui, et les bugs qui traînent l'attristent |
 
 ## Réglages
 

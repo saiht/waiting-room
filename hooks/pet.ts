@@ -4,10 +4,15 @@
 import type { Pet, PetMood, PetStage, PetView } from '../types'
 
 const HOUR = 3_600_000
-/** Au-delà, laisser Claude attendre une permission le fait bouder. */
+/** Au-delà, laisser Claude attendre une réponse le fait bouder. */
 export const SULK_AFTER_MS = 30_000
 const SULK_FOR_MS = 10 * 60_000
 const STROKE_EVERY_MS = 20_000
+const PLAY_XP_EVERY_MS = 60_000
+const MAX_COOKIES = 5
+const MAX_BUGS = 3
+/** Un repas sur quatre laisse un bug derrière lui. */
+const BUG_EVERY_MEALS = 4
 
 const STAGES: readonly { stage: PetStage; label: string; fromXp: number }[] = [
   { stage: 'egg', label: 'œuf', fromXp: 0 },
@@ -34,34 +39,40 @@ export function newPet(now: number): Pet {
     bornAt: now, updatedAt: now,
     xp: 0, meals: 0,
     satiety: 70, happiness: 70,
-    sulkUntil: 0, lastMealAt: 0, lastStrokeAt: 0,
+    cookies: 1, bugs: 0,
+    sulkUntil: 0, lastMealAt: 0, lastStrokeAt: 0, lastPlayAt: 0,
     words: 'Un œuf. Il éclora après quelques tâches.',
   }
 }
 
-/** Relit ce qui a été stocké : tout champ absent ou abîmé repart d'un œuf neuf. */
+/**
+ * Relit ce qui a été stocké. Un champ absent ou abîmé prend sa valeur de départ,
+ * pour qu'une bestiole née avec une version plus ancienne garde le reste.
+ */
 export function restorePet(stored: unknown, now: number): Pet {
   const fresh = newPet(now)
   if (typeof stored !== 'object' || stored === null) return fresh
   const held = stored as Record<string, unknown>
+  const born = held.bornAt
+  if (typeof born !== 'number' || !Number.isFinite(born) || born <= 0) return fresh
   const pet: Record<string, unknown> = { ...fresh }
   for (const key of Object.keys(fresh)) {
     const value = held[key]
     const isKept = key === 'words'
       ? typeof value === 'string'
       : typeof value === 'number' && Number.isFinite(value)
-    if (!isKept) return fresh
-    pet[key] = value
+    if (isKept) pet[key] = value
   }
 
   return pet as Pet
 }
 
-/** Le temps qui passe : la faim vient en 17 heures environ, et affamé il s'attriste. */
+/** Le temps qui passe : la faim vient en 17 heures environ ; affamé ou entouré de bugs, il s'attriste. */
 export function age(pet: Pet, now: number): Pet {
   const hours = Math.max(0, now - pet.updatedAt) / HOUR
   const satiety = clamp(pet.satiety - 6 * hours)
-  const happiness = satiety < 20 ? clamp(pet.happiness - 3 * hours) : pet.happiness
+  const gloom = (satiety < 20 ? 3 : 0) + pet.bugs * 1.5
+  const happiness = clamp(pet.happiness - gloom * hours)
 
   return { ...pet, satiety, happiness, updatedAt: now }
 }
@@ -74,23 +85,30 @@ export function stageOf(xp: number): { stage: PetStage; label: string; nextXp: n
   return { stage: current.stage, label: current.label, nextXp: STAGES[index + 1]?.fromXp ?? null }
 }
 
+const isEgg = (pet: Pet) => stageOf(pet.xp).stage === 'egg'
+
 /** Une tâche terminée est un repas, d'autant plus copieux que Claude a utilisé d'outils. */
 export function feed(pet: Pet, now: number, tools: number): Pet {
   const aged = age(pet, now)
   const gain = 1 + Math.min(10, Math.max(0, tools))
   const before = stageOf(aged.xp)
   const after = stageOf(aged.xp + gain)
+  const meals = aged.meals + 1
+  const leavesBug = after.stage !== 'egg' && meals % BUG_EVERY_MEALS === 0 && aged.bugs < MAX_BUGS
   const words = after.stage !== before.stage
     ? before.stage === 'egg' ? 'Il a éclos !' : `Il a grandi : le voilà ${after.label} !`
     : before.stage === 'egg' ? 'L\'œuf a bougé…'
+    : leavesBug ? 'Miam… oups, j\'ai laissé un bug.'
     : tools > 0 ? `Miam, ${tools} outil${tools > 1 ? 's' : ''} !` : 'Miam !'
 
   return {
     ...aged,
     xp: aged.xp + gain,
-    meals: aged.meals + 1,
+    meals,
     satiety: clamp(aged.satiety + 12 + Math.min(28, tools * 2)),
     happiness: clamp(aged.happiness + 4),
+    cookies: Math.min(MAX_COOKIES, aged.cookies + 1), // Claude rapporte un cookie par tâche
+    bugs: aged.bugs + (leavesBug ? 1 : 0),
     sulkUntil: 0, // un bon repas, et c'est oublié
     lastMealAt: now,
     words,
@@ -122,7 +140,52 @@ export function stroke(pet: Pet, now: number): Pet {
     happiness: counts ? clamp(aged.happiness + 6) : aged.happiness,
     sulkUntil: 0,
     lastStrokeAt: now,
-    words: wasSulking ? 'Bon… pardonné.' : 'Rrrr…',
+    words: wasSulking ? 'Bon… pardonné.' : isEgg(aged) ? 'L\'œuf est tout chaud.' : 'Rrrr…',
+  }
+}
+
+/** Une friandise, prise dans la réserve de cookies. */
+export function treat(pet: Pet, now: number): Pet {
+  const aged = age(pet, now)
+  if (isEgg(aged)) return { ...aged, words: 'Un œuf ne mange pas de cookies.' }
+  if (aged.cookies <= 0) return { ...aged, words: 'Plus de cookies : Claude en rapporte un par tâche.' }
+
+  return {
+    ...aged,
+    cookies: aged.cookies - 1,
+    satiety: clamp(aged.satiety + 8),
+    happiness: clamp(aged.happiness + 2),
+    lastMealAt: now,
+    words: 'Crunch crunch !',
+  }
+}
+
+/** Une partie de devinette : gagner le réjouit davantage, et l'entraîne un peu. */
+export function play(pet: Pet, now: number, hasWon: boolean): Pet {
+  const aged = age(pet, now)
+  if (isEgg(aged)) return { ...aged, words: 'Il n\'est pas encore né.' }
+  const earnsXp = now - aged.lastPlayAt >= PLAY_XP_EVERY_MS
+
+  return {
+    ...aged,
+    happiness: clamp(aged.happiness + (hasWon ? 8 : 3)),
+    xp: aged.xp + (earnsXp ? 1 : 0),
+    sulkUntil: 0,
+    lastPlayAt: now,
+    words: hasWon ? 'Gagné ! Encore !' : 'Raté, hi hi !',
+  }
+}
+
+/** Nettoyer les bugs qu'il a laissés. */
+export function clean(pet: Pet, now: number): Pet {
+  const aged = age(pet, now)
+  if (aged.bugs === 0) return { ...aged, words: 'Rien à nettoyer.' }
+
+  return {
+    ...aged,
+    happiness: clamp(aged.happiness + 3 * aged.bugs),
+    bugs: 0,
+    words: aged.bugs > 1 ? `${aged.bugs} bugs corrigés. Tout propre !` : 'Bug corrigé. Tout propre !',
   }
 }
 
@@ -164,10 +227,13 @@ export function viewOf(pet: Pet, name: string, now: number, forcedMood?: PetMood
   return {
     name, stage, stageLabel: label, mood,
     face: faceOf(stage, mood),
+    expression: FACES[mood],
     satiety: Math.round(aged.satiety),
     happiness: Math.round(aged.happiness),
     xp: aged.xp, nextXp,
     meals: aged.meals,
+    cookies: aged.cookies,
+    bugs: aged.bugs,
     ageDays: Math.floor((now - aged.bornAt) / (24 * HOUR)),
     words,
   }
@@ -175,5 +241,7 @@ export function viewOf(pet: Pet, name: string, now: number, forcedMood?: PetMood
 
 /** La ligne de repos de la barre de statut. */
 export function statusOf(view: PetView): string {
-  return `${view.face} ${view.name}  faim ${gauge(view.satiety)}  humeur ${gauge(view.happiness)}`
+  const bugs = view.bugs > 0 ? `  ${'🐛'.repeat(view.bugs)}` : ''
+
+  return `${view.face} ${view.name}  faim ${gauge(view.satiety)}  humeur ${gauge(view.happiness)}${bugs}`
 }

@@ -1,7 +1,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 
 import { newSnake, step, turn, typeKey, newTyping, wordsPerMinute, wrap } from '../hooks/game'
-import { age, feed, gauge, moodOf, newPet, restorePet, stageOf, stroke, sulk, viewOf } from '../hooks/pet'
+import { age, clean, feed, gauge, moodOf, newPet, play, restorePet, stageOf, stroke, sulk, treat, viewOf } from '../hooks/pet'
 import { formatDuration, pickDaily } from '../hooks/register'
 
 const PANE = {
@@ -183,6 +183,9 @@ test('tamagotchi : repas, faim, bouderie, caresse', () => {
 
   expect(restorePet({ ...pet }, later)).toEqual(pet)
   expect(restorePet({ ...pet, xp: 'beaucoup' }, later).xp).toBe(0)
+  // une bestiole née avant les cookies garde tout le reste
+  const { cookies: _, ...older } = pet
+  expect(restorePet(older, later)).toEqual({ ...pet, cookies: 1 })
   expect(restorePet(undefined, later).bornAt).toBe(later)
   expect(gauge(60)).toBe('▰▰▰▱▱')
 })
@@ -234,7 +237,7 @@ test('le tamagotchi se caresse dans le panneau, et se désactive', { options: { 
   expect(await shown(ui, /Un œuf/)).toBe(true)
   await ui.key({ key: ' ' })
   await ui.redraw()
-  expect(await shown(ui, /Rrrr/)).toBe(true)
+  expect(await shown(ui, /tout chaud/)).toBe(true)
   await ui.key({ key: 'tab' })
   expect(await shown(ui, /Snake/)).toBe(true)
   await ui.unmount()
@@ -247,5 +250,64 @@ test('tamagotchi désactivé : pas de vue dans le panneau, ni dans le cycle de T
   await ui.key({ key: 'tab' })
   await ui.key({ key: 'tab' })
   expect(await shown(ui, /Mochi/)).toBe(false)
+  await ui.unmount()
+})
+
+test('tamagotchi : friandise, devinette, bugs à nettoyer', () => {
+  const t0 = 1_000_000
+  const egg = newPet(t0)
+  expect(treat(egg, t0).cookies).toBe(1) // un œuf ne mange pas
+  expect(play(egg, t0, true).xp).toBe(0)
+
+  let pet = feed(egg, t0, 5) // éclos, un cookie de plus
+  expect(pet.cookies).toBe(2)
+  const snacked = treat(pet, t0 + 1000)
+  expect([snacked.cookies, snacked.words]).toEqual([1, 'Crunch crunch !'])
+  expect(snacked.satiety > pet.satiety).toBe(true)
+  expect(treat({ ...pet, cookies: 0 }, t0).words).toContain('Plus de cookies')
+
+  const won = play(pet, t0 + 120000, true)
+  expect([won.xp, won.words]).toEqual([pet.xp + 1, 'Gagné ! Encore !'])
+  const again = play(won, t0 + 121000, false)
+  expect(again.xp).toBe(won.xp) // pas d'expérience deux fois dans la minute
+  expect(again.happiness > won.happiness).toBe(true)
+
+  for (let i = 0; i < 3; i++) pet = feed(pet, t0, 0) // quatrième repas : un bug
+  expect([pet.meals, pet.bugs]).toEqual([4, 1])
+  expect(pet.words).toContain('bug')
+  const day = age(pet, t0 + 10 * 3_600_000)
+  expect(day.happiness < pet.happiness).toBe(true) // les bugs qui traînent l'attristent
+  const tidy = clean(pet, t0)
+  expect([tidy.bugs, tidy.words]).toEqual([0, 'Bug corrigé. Tout propre !'])
+  expect(clean(tidy, t0).words).toBe('Rien à nettoyer.')
+})
+
+test('dans le panneau : friandise, devinette et nettoyage', { options: { game: 'pet' } }, async ($, on) => {
+  const t0 = 1_000_000
+  mock.clock(on, { now: t0 })
+  mock.store(on, { pet: { ...feed(newPet(t0), t0, 5), bugs: 2, lastMealAt: 1 } })
+  on('ui.status', () => ({ value: undefined }))
+  on('command.register', () => ({ value: { command: 'waiting' } }))
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await shown(ui, /\(  .{3}  \)/)).toBe(true) // le bébé, dessiné en grand
+  expect(await shown(ui, /🍪 × 2/)).toBe(true)
+
+  await ui.key({ key: 'f' })
+  await ui.redraw()
+  expect(await shown(ui, /Crunch/)).toBe(true)
+  expect(await shown(ui, /🍪 × 1/)).toBe(true)
+
+  await ui.key({ key: 'n' })
+  await ui.redraw()
+  expect(await shown(ui, /2 bugs corrigés/)).toBe(true)
+
+  await ui.key({ key: 'j' })
+  expect(await shown(ui, /Dans quelle main/)).toBe(true)
+  await ui.key({ key: 'left' })
+  await ui.redraw()
+  expect(await shown(ui, /Gagné|Raté/)).toBe(true)
   await ui.unmount()
 })

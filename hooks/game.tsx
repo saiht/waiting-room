@@ -2,7 +2,7 @@
 // Il n'a pas accès à `$` : les scores partent vers le module de hooks avec `surface.post`.
 import type { ClientKeyEvent, ClientModule, ClientSurface } from 'claude-code'
 
-import type { GameId, GameProps } from '../types'
+import type { GameId, GameProps, PetStage } from '../types'
 
 type Cell = readonly [number, number]
 type Dir = 'up' | 'down' | 'left' | 'right'
@@ -36,8 +36,10 @@ type State = {
   /** Rien ne bouge avant qu'on appuie sur Espace. */
   isStarted: boolean
   isPaused: boolean
-  /** Battement de la dernière caresse au tamagotchi (0 : aucune). */
-  heartsAt: number
+  /** Dernier effet joué autour du tamagotchi, et le battement où il a commencé. */
+  fx: { kind: '' | 'hearts' | 'crumbs' | 'win' | 'lose' | 'clean'; at: number }
+  /** La devinette : dans quelle main est le cookie ? */
+  guess: { stage: 'idle' | 'pick' | 'reveal'; side: number; at: number }
   snake: Snake
   typing: Typing
 }
@@ -227,7 +229,8 @@ function initialState(props: GameProps): State {
     overrideFor: props.game,
     isStarted: false,
     isPaused: false,
-    heartsAt: 0,
+    fx: { kind: '', at: 0 },
+    guess: { stage: 'idle', side: 0, at: 0 },
     snake: newSnake(props.columns),
     typing: newTyping(),
   }
@@ -245,7 +248,7 @@ function onTick(surface: ClientSurface<State>): void {
     const snake = step(state.snake)
     if (snake.isOver) surface.post({ game: 'snake', score: snake.score })
     surface.setState({ ...state, snake })
-  } else if (ticks % 12 === 0) {
+  } else if (ticks % (currentGame(state, latest) === 'pet' ? 6 : 12) === 0) {
     surface.setState({ ...state }) // fait avancer les durées affichées
   }
 }
@@ -270,9 +273,26 @@ function onKey(surface: ClientSurface<State>, event: ClientKeyEvent): void {
     return
   }
   if (game === 'pet') {
-    if (key === ' ' || key === 'c') {
+    const pressed = key.toLowerCase()
+    const fx = (kind: State['fx']['kind']) => ({ kind, at: ticks })
+    if (state.guess.stage === 'pick' && (pressed === 'left' || pressed === 'right')) {
+      const hasWon = (pressed === 'left' ? 0 : 1) === state.guess.side
+      surface.post({ pet: 'play', won: hasWon })
+      surface.setState({ ...state, guess: { ...state.guess, stage: 'reveal', at: ticks }, fx: fx(hasWon ? 'win' : 'lose') })
+    } else if (pressed === ' ' || pressed === 'c') {
       surface.post({ pet: 'stroke' })
-      surface.setState({ ...state, heartsAt: ticks })
+      surface.setState({ ...state, fx: fx('hearts') })
+    } else if (pressed === 'f') {
+      surface.post({ pet: 'treat' })
+      const canEat = latest.pet !== null && latest.pet.cookies > 0 && latest.pet.stage !== 'egg'
+      surface.setState({ ...state, fx: canEat ? fx('crumbs') : state.fx })
+    } else if (pressed === 'j' && latest.pet !== null && latest.pet.stage !== 'egg') {
+      surface.setState({ ...state, guess: { stage: 'pick', side: Math.random() < 0.5 ? 0 : 1, at: ticks } })
+    } else if (pressed === 'j') {
+      surface.post({ pet: 'play', won: false })
+    } else if (pressed === 'n') {
+      surface.post({ pet: 'clean' })
+      surface.setState({ ...state, fx: latest.pet !== null && latest.pet.bugs > 0 ? fx('clean') : state.fx })
     }
 
     return
@@ -311,6 +331,43 @@ function onKey(surface: ClientSurface<State>, event: ClientKeyEvent): void {
 
 // ---------- Dessin ----------
 
+// Le tamagotchi à chaque âge ; FFF est remplacé par ses yeux et sa bouche.
+const ART: Record<PetStage, readonly string[]> = {
+  egg: [
+    '    ___',
+    '   /   \\',
+    '  |  ·  |',
+    '   \\___/',
+  ],
+  baby: [
+    '  .-----.',
+    ' (  FFF  )',
+    "  `-----'",
+    '   U   U',
+  ],
+  teen: [
+    '  /\\___/\\',
+    ' (  FFF  )',
+    '  >  ^  <',
+    '  (__|__)',
+  ],
+  adult: [
+    '   \\  |  /',
+    '  .-------.',
+    ' (   FFF   )',
+    '  \\  ___  /',
+    '  /|     |\\',
+    '   d     b',
+  ],
+  sage: [
+    '      ✦',
+    '   .-/\\-.',
+    '  (  FFF  )',
+    ' ~/|  ~  |\\~',
+    "   `-..-'",
+  ],
+}
+
 const Game: ClientModule<GameProps, State> = (props, surface) => {
   latest = props
   const { Box, Text } = surface.elements
@@ -339,20 +396,61 @@ const Game: ClientModule<GameProps, State> = (props, surface) => {
 
   if (game === 'pet' && props.pet !== null) {
     const pet = props.pet
-    const hasHearts = state.heartsAt !== 0 && ticks - state.heartsAt < 40
+    const beat = Math.floor(ticks / 12) // deux battements par seconde environ
+    const fx = ticks - state.fx.at < 45 ? state.fx.kind : ''
+    const isPicking = state.guess.stage === 'pick'
+    const isRevealing = state.guess.stage === 'reveal' && ticks - state.guess.at < 45
+    const isBlinking = ticks % 100 < 5 && pet.mood !== 'sulking'
+    const art = ART[pet.stage].map(line => line.replace('FFF', isBlinking ? '-‿-' : pet.expression))
+    const isLively = pet.mood === 'happy' || pet.mood === 'loved' || pet.mood === 'eating' || fx === 'win'
+    const isUp = isLively && beat % 2 === 0 // il sautille : la ligne vide passe du dessus au dessous
+    const sway = pet.stage === 'egg' || pet.mood === 'hungry' ? beat % 2 : 0 // l'œuf oscille, l'affamé tremble
+    const tint = pet.mood === 'sulking' ? 'red'
+      : pet.mood === 'hungry' || pet.mood === 'sad' ? 'yellow'
+      : pet.mood === 'loved' ? 'magenta' : 'cyan'
+    const above = fx === 'hearts' || pet.mood === 'loved' ? (beat % 2 === 0 ? '♥       ♥' : '    ♥')
+      : fx === 'crumbs' ? ' · crunch ·'
+      : fx === 'win' ? ' ✦   ✦   ✦'
+      : fx === 'lose' ? ' ~ hi hi ~'
+      : fx === 'clean' ? ' ✧ propre ✧'
+      : pet.mood === 'sulking' ? '    💢'
+      : pet.mood === 'hungry' ? '    …' : ''
+    const hands = isPicking ? '✊           ✊'
+      : isRevealing ? (state.guess.side === 0 ? '🍪           ✋' : '✋           🍪') : ''
+    const width = Math.min(Math.max(32, props.columns), 46)
+    const base = Math.max(0, Math.floor((width - 4 - 13) / 2))
+    // Le retrait passe par la mise en page, pas par des espaces en tête de texte.
+    const row = (text: string, shift: number, color?: string) => (
+      <Box paddingLeft={base + shift + text.length - text.trimStart().length}>
+        <Text color={color} bold={color !== undefined}>{text.trimStart() || ' '}</Text>
+      </Box>
+    )
+    const body = art.map(line => row(line, sway, tint))
+    const stage = pet.nextXp === null ? `${pet.xp} xp` : `${pet.xp} / ${pet.nextXp} xp`
 
     return (
       <Box flexDirection="column">
-        <Text>🐣 {pet.name}   {pet.stageLabel} · {pet.ageDays} j · {pet.meals} repas</Text>
+        <Text>🐣 {pet.name}   {pet.stageLabel} · {pet.ageDays} j · {pet.meals} repas · {stage}</Text>
         {banner}
-        <Box flexDirection="column" borderStyle="round" paddingX={2} paddingY={1} width={Math.min(Math.max(24, props.columns), 46)}>
-          <Text bold>{hasHearts ? `♥ ${pet.face} ♥` : pet.face}</Text>
-          <Text dimColor>« {pet.words} »</Text>
+        <Box flexDirection="column" borderStyle="round" width={width}>
+          {row(above, 0, 'magenta')}
+          {isUp ? body : row('', 0)}
+          {isUp ? row('', 0) : body}
+          {row(hands, 0)}
+          <Box flexDirection="row" justifyContent="space-between" paddingX={1}>
+            <Box paddingLeft={pet.bugs > 0 ? beat % 8 : 0}>
+              <Text>{'🐛 '.repeat(pet.bugs) || ' '}</Text>
+            </Box>
+            <Text>🍪 × {pet.cookies}</Text>
+          </Box>
         </Box>
-        <Text>faim    {gauge(pet.satiety)} {pet.satiety} %</Text>
-        <Text>humeur  {gauge(pet.happiness)} {pet.happiness} %</Text>
-        <Text>xp      {pet.xp}{pet.nextXp === null ? '' : ` / ${pet.nextXp}`}</Text>
-        <Text dimColor>Espace : caresser · Tab : autre jeu · Échap : sortir</Text>
+        <Text italic>« {isPicking ? 'Dans quelle main est le cookie ? ← →' : pet.words} »</Text>
+        <Box flexDirection="row" gap={3}>
+          <Text>faim <Text color={pet.satiety < 25 ? 'red' : 'green'}>{gauge(pet.satiety)}</Text> {pet.satiety} %</Text>
+          <Text>humeur <Text color={pet.happiness < 30 ? 'red' : 'green'}>{gauge(pet.happiness)}</Text> {pet.happiness} %</Text>
+        </Box>
+        <Text bold>[Espace] caresser  [F] friandise  [J] jouer  [N] nettoyer</Text>
+        <Text dimColor>Tab : autre jeu · Échap : sortir</Text>
       </Box>
     )
   }

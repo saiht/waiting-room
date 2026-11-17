@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, Timer } from 'claude-code'
 
 import type { Best, GameId, GameProps, Pet, Phase } from '../types'
-import { SULK_AFTER_MS, age, feed, newPet, restorePet, stageOf, statusOf, stroke, sulk, viewOf } from './pet'
+import { SULK_AFTER_MS, age, clean, feed, newPet, play, restorePet, stageOf, statusOf, stroke, sulk, treat, viewOf } from './pet'
 
 const PANE = 'waiting-room'
 /** Les jeux du tirage du jour ; le tamagotchi s'ouvre à la demande ou avec Tab. */
@@ -21,7 +21,7 @@ const best = atom(
   { shape: 'best-1' },
 )
 // bornAt à 0 : pas encore chargé depuis le stockage.
-const petAtom = atom({ plugin: 'waiting-room', key: 'pet' } as const, newPet(0), { shape: 'pet-1' })
+const petAtom = atom({ plugin: 'waiting-room', key: 'pet' } as const, newPet(0), { shape: 'pet-2' })
 
 const ANIMATIONS: Record<string, (t: number) => string> = {
   runner(t) {
@@ -83,7 +83,7 @@ const live = {
 
 async function openPane($: EngineInterface, isAsked: boolean): Promise<void> {
   // Le clavier est demandé pour le panneau ; Claude Code ne l'accorde que si le prompt est vide.
-  const opened = await $.ui.open({ id: PANE, title: 'En attendant Claude', focus: true, rows: 17, columns: 56 })
+  const opened = await $.ui.open({ id: PANE, title: 'En attendant Claude', focus: true, rows: 19, columns: 56 })
   if (!opened.isPlaced && !isAsked && !live.hasHinted) {
     live.hasHinted = true
     $.ui.toast('🎮 Tape /waiting pour jouer en attendant Claude')
@@ -293,7 +293,7 @@ export const register: Register = (on, options) => {
 
   // Le panneau parle au module : un score à garder, ou une caresse.
   on('ui.message', async ($, e, next) => {
-    const data = e.data as { game?: unknown; score?: unknown; pet?: unknown } | null
+    const data = e.data as { game?: unknown; score?: unknown; pet?: unknown; won?: unknown } | null
     if (e.requestId !== PANE || !data) return next(e)
 
     if ((data.game === 'snake' || data.game === 'typing') && typeof data.score === 'number') {
@@ -305,12 +305,18 @@ export const register: Register = (on, options) => {
         await $.store.set('best', record)
       }
     }
-    if (data.pet === 'stroke' && live.isPetOn && live.pet) {
+    if (typeof data.pet === 'string' && live.isPetOn && live.pet) {
       const now = await $.clock.now()
-      const stroked = stroke(live.pet, now)
-      await savePet($, stroked)
-      if ((await read($, phase)).state !== 'working') {
-        $.ui.status(statusOf(viewOf(stroked, live.petName, now)))
+      const acted = data.pet === 'stroke' ? stroke(live.pet, now)
+        : data.pet === 'treat' ? treat(live.pet, now)
+        : data.pet === 'play' ? play(live.pet, now, data.won === true)
+        : data.pet === 'clean' ? clean(live.pet, now)
+        : undefined
+      if (acted) {
+        await savePet($, acted)
+        if ((await read($, phase)).state !== 'working') {
+          $.ui.status(statusOf(viewOf(acted, live.petName, now)))
+        }
       }
     }
 
