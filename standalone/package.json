@@ -1,0 +1,13 @@
+{
+  "name": "waiting-room-standalone",
+  "version": "0.1.0",
+  "description": "De quoi patienter pendant que Claude Code travaille : mini-jeux dans un panneau voisin et animation dans la barre de statut.",
+  "private": true,
+  "scripts": {
+    "play": "node play.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

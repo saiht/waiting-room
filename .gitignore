@@ -1,0 +1,11 @@
+# Réglages propres à chaque machine
+standalone/config.json
+.claude/
+*.waiting-claude.bak
+
+# Types écrits par Claude Code au chargement du mod
+.claude-plugin/types/
+
+node_modules/
+.DS_Store
+*.log

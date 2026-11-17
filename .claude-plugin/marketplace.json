@@ -1,0 +1,13 @@
+{
+  "name": "waiting-room",
+  "description": "Mini-jeux et animation de barre de statut pour patienter pendant que Claude Code travaille.",
+  "owner": {
+    "name": "Saiht"
+  },
+  "plugins": [
+    {
+      "name": "waiting-room",
+      "source": "./"
+    }
+  ]
+}

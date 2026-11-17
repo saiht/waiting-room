@@ -1,0 +1,49 @@
+{
+  "name": "waiting-room",
+  "version": "0.2.0",
+  "description": "De quoi patienter pendant que Claude travaille : mini-jeux dans un panneau et animation dans la barre de statut.",
+  "author": {
+    "name": "Saiht"
+  },
+  "license": "MIT",
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "game": {
+      "type": "string",
+      "title": "Jeu",
+      "description": "Jeu proposé pendant l'attente : un jeu fixe, un tirage au sort par jour, ou aucun.",
+      "options": [
+        "random-daily",
+        "snake",
+        "typing",
+        "off"
+      ],
+      "default": "random-daily"
+    },
+    "delaySeconds": {
+      "type": "number",
+      "title": "Délai avant le jeu (secondes)",
+      "description": "Temps de travail de Claude avant que le panneau de jeu s'ouvre. Mets une grande valeur (par exemple 120) pour ne jouer que pendant les longues tâches.",
+      "default": 5
+    },
+    "animation": {
+      "type": "string",
+      "title": "Animation de la barre de statut",
+      "description": "Animation affichée pendant que Claude travaille.",
+      "options": [
+        "random-daily",
+        "runner",
+        "wave",
+        "serpent",
+        "off"
+      ],
+      "default": "random-daily"
+    },
+    "closeWhenDone": {
+      "type": "boolean",
+      "title": "Fermer le jeu quand Claude a fini",
+      "description": "Ferme le panneau de jeu dès que Claude a terminé, au lieu de te laisser finir ta partie.",
+      "default": false
+    }
+  }
+}
