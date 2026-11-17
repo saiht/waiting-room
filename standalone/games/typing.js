@@ -128,7 +128,6 @@ function wordsPerMinute(chars, ms) {
 function start(sh) {
   let best = getBest('typing');
   let text = null;
-  let started = false; // rien ne se tape avant qu'on appuie sur Espace
   let pos, errors, strokes, startAt, endAt, wrong;
 
   function next() {
@@ -160,8 +159,8 @@ function start(sh) {
       lines.push(line);
     }
     lines.push('', `  \x1b[1m${wpm}\x1b[0m mots/min   précision ${accuracy} %`, '');
-    lines.push(!started
-      ? ' ▶ Espace pour démarrer · Tab : autre jeu · Échap : quitter'
+    lines.push(!startAt
+      ? ' ▶ Tape le premier caractère pour démarrer · Tab : autre jeu · Échap : quitter'
       : endAt
       ?` ${wpm >= best && wpm > 0 ? '🏆 Record !' : '✔ Terminé.'} Entrée pour la phrase suivante`
       : sh.footer('Tape le texte'));
@@ -171,15 +170,13 @@ function start(sh) {
   sh.on({
     redraw: draw,
     key(k) {
-      if (!started) {
-        if (k === ' ') { started = true; draw(); }
-        return;
-      }
       if (endAt) {
         if (k === '\r') next();
         return;
       }
       if (k.length > 2 || k < ' ' || k === '\x7f') return; // flèches, contrôles, retour arrière
+      // Le chrono part au premier caractère juste ; avant, rien ne compte.
+      if (!startAt && k !== text[0]) return;
       if (!startAt) startAt = Date.now();
       strokes++;
       if (k === text[pos]) {

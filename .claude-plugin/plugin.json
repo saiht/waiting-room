@@ -1,6 +1,6 @@
 {
   "name": "waiting-room",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "De quoi patienter pendant que Claude travaille : mini-jeux, tamagotchi et animation dans la barre de statut.",
   "author": {
     "name": "Saiht"

@@ -30,7 +30,7 @@ Le mod s'appuie sur l'API des mods de Claude Code, encore en accès anticipé : 
 Lance une tâche. Au bout du délai réglé (5 secondes par défaut), le panneau de jeu s'ouvre.
 
 1. Le panneau demande le clavier à son ouverture. Claude Code ne le lui donne que si ton prompt est vide ; si le jeu ne répond pas, **clique dedans**.
-2. **Espace** pour démarrer : rien ne bouge avant.
+2. **Espace** pour démarrer : rien ne bouge avant. Le test de frappe, lui, démarre au premier caractère juste.
 3. **Échap** rend le clavier à Claude. Le panneau reste ouvert, tu peux y revenir d'un clic.
 
 | Touche | Action |

@@ -513,7 +513,9 @@ export function newTyping(previous = '', random: () => number = Math.random): Ty
 
 export function typeKey(typing: Typing, key: string, now: number): Typing {
   if (typing.endedAt !== 0) return typing
-  const startedAt = typing.startedAt || now
+  // Le chrono part au premier caractère juste ; avant, rien ne compte.
+  if (typing.startedAt === 0 && key !== typing.text[0]) return typing
+  const startedAt = typing.startedAt || Math.max(1, now)
   if (key !== typing.text[typing.pos]) {
     return { ...typing, startedAt, strokes: typing.strokes + 1, errors: typing.errors + 1, isWrong: true }
   }
@@ -673,7 +675,7 @@ function onKey(surface: ClientSurface<State>, event: ClientKeyEvent): void {
 
     return
   }
-  if (!state.isStarted) {
+  if (!state.isStarted && game !== 'typing') {
     if (key === ' ') surface.setState({ ...state, isStarted: true })
 
     return
@@ -984,7 +986,8 @@ const Game: ClientModule<GameProps, State> = (props, surface) => {
       </Box>
     )
   })
-  const help = !state.isStarted ? start
+  const help = typing.startedAt === 0
+    ? <Text bold>▶ Tape le premier caractère pour démarrer · Tab : autre jeu</Text>
     : isDone ? <Text bold>{speed >= record && speed > 0 ? '🏆 Record !' : '✔ Terminé.'} Entrée pour la phrase suivante</Text>
     : <Text dimColor>Tape le texte · Tab : autre jeu · Échap : sortir</Text>
 

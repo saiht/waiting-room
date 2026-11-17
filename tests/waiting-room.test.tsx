@@ -40,14 +40,20 @@ test('snake : rien ne bouge avant Espace, puis la partie se joue', { options: { 
   await ui.unmount()
 })
 
-test('Tab passe au test de frappe, qui attend Espace lui aussi', { options: { game: 'snake' } }, async ($, on) => {
+test('Tab passe au test de frappe, qui démarre au premier caractère juste', { options: { game: 'snake' } }, async ($, on) => {
   mock.clock(on)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
 
   await ui.key({ key: 'tab' })
   expect(await shown(ui, /Frappe/)).toBe(true)
-  expect(await shown(ui, /Espace pour démarrer/)).toBe(true)
-  await ui.key({ key: ' ' })
+  expect(await shown(ui, /premier caractère pour démarrer/)).toBe(true)
+  await ui.key({ key: ' ' }) // Espace ne démarre plus rien ici
+  expect(await shown(ui, /premier caractère pour démarrer/)).toBe(true)
+  // la phrase est tirée au sort : on essaie les premières lettres possibles
+  for (const key of 'gdnpcsifeSCULIPVD') {
+    if (await shown(ui, /Tape le texte/)) break
+    await ui.key({ key })
+  }
   expect(await shown(ui, /Tape le texte/)).toBe(true)
   await ui.unmount()
 })
@@ -130,11 +136,13 @@ test('logique du snake', () => {
 
 test('logique du test de frappe', () => {
   let typing = { ...newTyping('', () => 0), text: 'ab' }
-  typing = typeKey(typing, 'x', 1000)
-  expect([typing.pos, typing.errors, typing.isWrong]).toEqual([0, 1, true])
+  typing = typeKey(typing, 'x', 1000) // avant le premier caractère juste, rien ne compte
+  expect([typing.pos, typing.errors, typing.startedAt]).toEqual([0, 0, 0])
   typing = typeKey(typing, 'a', 2000)
+  typing = typeKey(typing, 'x', 3000)
+  expect([typing.pos, typing.errors, typing.isWrong]).toEqual([1, 1, true])
   typing = typeKey(typing, 'b', 7000)
-  expect([typing.pos, typing.strokes, typing.startedAt, typing.endedAt]).toEqual([2, 3, 1000, 7000])
+  expect([typing.pos, typing.strokes, typing.startedAt, typing.endedAt]).toEqual([2, 3, 2000, 7000])
   expect(wordsPerMinute(50, 60000)).toBe(10)
 
   const text = 'Un bon commit explique pourquoi, pas comment.'
