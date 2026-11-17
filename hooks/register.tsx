@@ -72,8 +72,12 @@ const live = {
   isPetOn: true,
   /** Outils utilisés pendant le tour en cours. */
   tools: 0,
-  /** Depuis quand Claude attend une permission (0 : il n'attend pas). */
-  waitingSince: 0,
+  /** Depuis quand une boîte de dialogue de Claude attend une réponse (0 : aucune). */
+  askedAt: 0,
+  /** Plus longue attente du tour, pas encore prise en compte. */
+  longestWait: 0,
+  /** Boîtes de dialogue déjà vues, pour ne pas les recompter quand elles se redessinent. */
+  asked: new Set<string>(),
   hasHinted: false,
 }
 
@@ -92,12 +96,19 @@ async function savePet($: EngineInterface, pet: Pet): Promise<void> {
   await $.store.set('pet', pet)
 }
 
-/** Claude n'attend plus : s'il a attendu trop longtemps, le tamagotchi boude. */
+/** La boîte de dialogue a eu sa réponse : on retient combien de temps elle a attendu. */
+function markAnswered(now: number): void {
+  if (live.askedAt === 0) return
+  live.longestWait = Math.max(live.longestWait, now - live.askedAt)
+  live.askedAt = 0
+}
+
+/** Si Claude a attendu trop longtemps une réponse, le tamagotchi boude. */
 async function settleWait($: EngineInterface): Promise<void> {
-  if (live.waitingSince === 0) return
   const now = await $.clock.now()
-  const waited = now - live.waitingSince
-  live.waitingSince = 0
+  markAnswered(now)
+  const waited = live.longestWait
+  live.longestWait = 0
   if (live.isPetOn && live.pet && waited > SULK_AFTER_MS) {
     const sulky = sulk(live.pet, now, waited)
     await savePet($, sulky)
@@ -152,7 +163,8 @@ export const register: Register = (on, options) => {
       await update($, phase, (): Phase => ({ state: 'working', since: now, at: 0 }))
       stopTimers()
       live.tools = 0
-      live.waitingSince = 0
+      live.askedAt = 0
+      live.longestWait = 0
 
       const name = ANIMATIONS[animationOption]
         ? animationOption
@@ -164,7 +176,7 @@ export const register: Register = (on, options) => {
           t += 1
           const elapsed = t * 500
           const at = now + elapsed
-          const isImpatient = live.waitingSince !== 0 && at - live.waitingSince > SULK_AFTER_MS
+          const isImpatient = live.askedAt !== 0 && at - live.askedAt > SULK_AFTER_MS
           const face = live.isPetOn && live.pet
             ? `${viewOf(live.pet, live.petName, at, isImpatient ? 'sulking' : undefined).face} `
             : ''
@@ -180,19 +192,30 @@ export const register: Register = (on, options) => {
     return next(e)
   })
 
-  // Une demande de permission : on note depuis quand Claude attend.
-  on('classic.Notification', async ($, e, next) => {
-    if (e.notification_type === 'permission_prompt' && live.waitingSince === 0) {
-      live.waitingSince = await $.clock.now()
+  // Chaque outil passe par ici avant de tourner : on les compte, et l'outil
+  // précédent, s'il attendait une réponse, l'a forcément eue.
+  on('tool.check', async ($, e, next) => {
+    live.tools += 1
+    await settleWait($)
+
+    return next(e)
+  }).catch(($, e, next) => next(e)) // un souci ici ne doit jamais toucher aux permissions
+
+  // Une boîte de dialogue (permission, question) s'affiche : Claude attend.
+  // Un hook de dessin ne peut rien écrire : il note seulement l'heure.
+  on('ui.render', { component: 'AskUserQuestion' }, async ($, e, next) => {
+    if (!live.asked.has(e.requestId)) {
+      if (live.asked.size > 500) live.asked.clear()
+      live.asked.add(e.requestId)
+      if (live.askedAt === 0) live.askedAt = await $.clock.now()
     }
 
     return next(e)
   })
 
-  // Un outil a tourné : la permission a donc été donnée.
-  on('classic.PostToolUse', async ($, e, next) => {
-    live.tools += 1
-    await settleWait($)
+  // L'outil avance : la réponse a donc été donnée.
+  on('ui.render', { component: 'ToolProgress' }, async ($, e, next) => {
+    if (live.askedAt !== 0) markAnswered(await $.clock.now())
 
     return next(e)
   })

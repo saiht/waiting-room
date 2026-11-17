@@ -63,7 +63,7 @@ Il vit dans la barre de statut, sous le prompt, et se garde d'une session à l'a
 | --- | --- |
 | Claude termine une tâche | un repas : la faim baisse, l'humeur monte, il gagne de l'expérience (plus Claude a utilisé d'outils, plus le repas est copieux) |
 | Le temps passe | la faim revient, en 17 heures environ ; affamé, il s'attriste |
-| Claude attend une permission plus de 30 secondes | il boude pendant 10 minutes et perd de l'humeur |
+| Une boîte de dialogue de Claude (permission, question) attend plus de 30 secondes | il boude pendant 10 minutes et perd de l'humeur |
 | Tu le caresses (`Espace` dans sa vue) | l'humeur remonte, et il pardonne |
 
 Il commence en œuf, éclot après quelques tâches, puis grandit : bébé, ado, adulte, sage. Il ne meurt pas.

@@ -206,16 +206,16 @@ test('une tâche terminée nourrit le tamagotchi ; faire attendre Claude le fait
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('turn.start', (_, e) => ({ turnId: e.turnId }))
   on('turn.complete', () => ({ text: 'fait' }))
-  on('classic.Notification', () => ({}))
 
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   expect(statuses.at(-1)).toContain('Mochi')
 
   await $.turn.start({ text: 'salut', turnId: 't1' })
-  await $.classic.Notification({ message: 'Autoriser ?', notification_type: 'permission_prompt' })
+  const dialog = await $.ui.mount({ plugin: 'waiting-room', component: 'AskUserQuestion', requestId: 'outil-1', surface: 'terminal', props: { tool: 'Bash', questions: [] } })
   await clock.advance(45000)
   expect(statuses.some(s => s.includes('Claude t\'attend'))).toBe(true)
 
+  await dialog.unmount()
   await $.turn.complete({ answer: 'fait', durationMs: 45000, isAborted: false, turnId: 't1', reason: 'answer' })
   expect(toasts.some(t => t.includes('Mochi boude'))).toBe(true)
   expect(statuses.at(-1)).toContain('L\'œuf a bougé')
