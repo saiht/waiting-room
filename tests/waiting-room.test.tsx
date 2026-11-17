@@ -50,7 +50,7 @@ test('Tab passe au test de frappe, qui démarre au premier caractère juste', { 
   await ui.key({ key: ' ' }) // Espace ne démarre plus rien ici
   expect(await shown(ui, /premier caractère pour démarrer/)).toBe(true)
   // la phrase est tirée au sort : on essaie les premières lettres possibles
-  for (const key of 'gdnpcsifeSCULIPVD') {
+  for (const key of 'ABCDEFGHIJKLMNOPQRSTUVWXYZ') {
     if (await shown(ui, /Tape le texte/)) break
     await ui.key({ key })
   }
