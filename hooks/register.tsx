@@ -6,7 +6,7 @@ import { SULK_AFTER_MS, age, clean, feed, newPet, play, restorePet, stageOf, sta
 
 const PANE = 'waiting-room'
 /** Les jeux du tirage du jour ; le tamagotchi s'ouvre à la demande ou avec Tab. */
-const DAILY_GAMES: readonly GameId[] = ['snake', 'typing', 'runner']
+const DAILY_GAMES: readonly GameId[] = ['snake', 'typing', 'runner', 'racer']
 const TRACK = 16
 
 const phase = atom(
@@ -17,8 +17,8 @@ const phase = atom(
 const chosen = atom({ plugin: 'waiting-room', key: 'game' } as const, '')
 const best = atom(
   { plugin: 'waiting-room', key: 'best' } as const,
-  { snake: 0, typing: 0, runner: 0 } as Best,
-  { shape: 'best-2' },
+  { snake: 0, typing: 0, runner: 0, racer: 0 } as Best,
+  { shape: 'best-3' },
 )
 // bornAt à 0 : pas encore chargé depuis le stockage.
 const petAtom = atom({ plugin: 'waiting-room', key: 'pet' } as const, newPet(0), { shape: 'pet-2' })
@@ -62,7 +62,7 @@ export function formatDuration(ms: number): string {
 }
 
 const isGame = (value: unknown): value is GameId =>
-  value === 'snake' || value === 'typing' || value === 'runner' || value === 'pet'
+  value === 'snake' || value === 'typing' || value === 'runner' || value === 'racer' || value === 'pet'
 
 // Ce que les minuteurs lisent sans attendre : repart de zéro à chaque rechargement,
 // puis `session.start` le remplit.
@@ -83,7 +83,7 @@ const live = {
 
 async function openPane($: EngineInterface, isAsked: boolean): Promise<void> {
   // Le clavier est demandé pour le panneau ; Claude Code ne l'accorde que si le prompt est vide.
-  const opened = await $.ui.open({ id: PANE, title: 'En attendant Claude', focus: true, rows: 19, columns: 56 })
+  const opened = await $.ui.open({ id: PANE, title: 'En attendant Claude', focus: true, rows: 20, columns: 60 })
   if (!opened.isPlaced && !isAsked && !live.hasHinted) {
     live.hasHinted = true
     $.ui.toast('🎮 Tape /waiting pour jouer en attendant Claude')
@@ -139,7 +139,7 @@ export const register: Register = (on, options) => {
     await $.command.register({
       name: 'waiting',
       description: 'Ouvre un mini-jeu ou le tamagotchi pour patienter pendant que Claude travaille',
-      argumentHint: '[snake|typing|runner|pet|close]',
+      argumentHint: '[snake|typing|runner|racer|pet|close]',
       immediate: true,
     })
     const stored = (await $.store.get('best')) as Partial<Best> | undefined
@@ -148,6 +148,7 @@ export const register: Register = (on, options) => {
         snake: Number(stored.snake) || 0,
         typing: Number(stored.typing) || 0,
         runner: Number(stored.runner) || 0,
+        racer: Number(stored.racer) || 0,
       }
       await update($, best, () => kept)
     }
@@ -259,7 +260,7 @@ export const register: Register = (on, options) => {
       return { text: 'Panneau de jeu fermé.' }
     }
     if (arg !== '' && !isGame(arg)) {
-      return { text: `Jeu inconnu : ${arg}. Choix possibles : snake, typing, runner, pet, close.` }
+      return { text: `Jeu inconnu : ${arg}. Choix possibles : snake, typing, runner, racer, pet, close.` }
     }
     if (arg === 'pet' && !live.isPetOn) {
       return { text: 'Le tamagotchi est désactivé : réactive-le dans /config.' }
@@ -300,7 +301,7 @@ export const register: Register = (on, options) => {
     const data = e.data as { game?: unknown; score?: unknown; pet?: unknown; won?: unknown } | null
     if (e.requestId !== PANE || !data) return next(e)
 
-    if ((data.game === 'snake' || data.game === 'typing' || data.game === 'runner') && typeof data.score === 'number') {
+    if ((data.game === 'snake' || data.game === 'typing' || data.game === 'runner' || data.game === 'racer') && typeof data.score === 'number') {
       const score = Math.round(data.score)
       const held = await read($, best)
       if (Number.isFinite(score) && score > held[data.game] && score < 100000) {

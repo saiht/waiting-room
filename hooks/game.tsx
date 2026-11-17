@@ -43,6 +43,7 @@ type State = {
   snake: Snake
   typing: Typing
   runner: Runner
+  racer: Racer
 }
 
 const TICK_MS = 40
@@ -326,6 +327,181 @@ export function runnerRows(runner: Runner, beat: number): Segment[][] {
   return rows
 }
 
+// ---------- Course auto, vue du cockpit ----------
+
+export type RaceCar = { z: number; x: number; color: string }
+
+export type Racer = {
+  width: number
+  /** Position sur la route : -1 bord gauche, 1 bord droit ; au-delà, c'est l'herbe. */
+  x: number
+  speed: number
+  distance: number
+  /** Courbure de la route sous les roues, et celle vers laquelle elle tend. */
+  curve: number
+  target: number
+  nextTurnAt: number
+  /** Cap cumulé : fait défiler les montagnes dans les virages. */
+  heading: number
+  /** Les autres voitures, à une distance z devant (1 : à notre hauteur). */
+  cars: readonly RaceCar[]
+  toNext: number
+  /** Pas pendant lesquels le capot penche encore, signé par le sens du coup de volant. */
+  lean: number
+  isOver: boolean
+}
+
+const ROAD_ROWS = 8
+const SKY_ROWS = 3
+const LANES = [-0.62, 0, 0.62]
+const CAR_COLORS = ['#f5d90a', '#e879f9', '#ff8b3e']
+const CURVES = [-0.8, -0.45, 0, 0, 0.45, 0.8]
+const RIDGE = '▁▁▂▃▂▁▁▁▂▄▅▄▂▁▁▂▃▂▁▁▁▁▂▃▄▃▂▁'
+
+const mod = (value: number, by: number) => ((value % by) + by) % by
+const bound = (value: number, low: number, high: number) => Math.max(low, Math.min(high, value))
+
+export const racerScore = (racer: Racer) => Math.floor(racer.distance / 3)
+const racerTopSpeed = (racer: Racer) => Math.min(1.4, 0.7 + racerScore(racer) / 400)
+
+export function newRacer(columns: number): Racer {
+  return {
+    width: bound(columns - 4, 28, 60),
+    x: 0, speed: 0.3, distance: 0,
+    curve: 0, target: 0, nextTurnAt: 25, heading: 0,
+    cars: [], toNext: 18, lean: 0, isOver: false,
+  }
+}
+
+/** Un coup de volant : -1 à gauche, 1 à droite. */
+export function steer(racer: Racer, dir: -1 | 1): Racer {
+  return racer.isOver ? racer : { ...racer, x: bound(racer.x + dir * 0.14, -1.5, 1.5), lean: dir * 4 }
+}
+
+export function stepRacer(racer: Racer, random: () => number = Math.random): Racer {
+  if (racer.isOver) return racer
+  // Dans l'herbe on ralentit ; sur la route la voiture accélère toute seule.
+  const speed = Math.abs(racer.x) > 1
+    ? Math.max(0.25, racer.speed * 0.9)
+    : Math.min(racerTopSpeed(racer), racer.speed + 0.012)
+  const distance = racer.distance + speed
+  let { target, nextTurnAt } = racer
+  if (distance >= nextTurnAt) {
+    target = CURVES[Math.floor(random() * CURVES.length)] ?? 0
+    nextTurnAt = distance + 30 + random() * 40
+  }
+  const curve = racer.curve + bound(target - racer.curve, -0.03, 0.03)
+  // Le virage déporte vers l'extérieur : il faut tourner dans son sens pour rester en piste.
+  const x = bound(racer.x - curve * speed * 0.045, -1.5, 1.5)
+  const closing = Math.max(0, speed - 0.35) * 0.25
+  const moved = racer.cars.map(car => ({ ...car, z: car.z - closing }))
+  const isHit = moved.some(car => car.z <= 1.1 && car.z > 0.75 && Math.abs(car.x - x) < 0.42)
+  const cars = moved.filter(car => car.z > 0.75)
+  let toNext = racer.toNext - speed
+  if (toNext <= 0) {
+    cars.push({
+      z: 8.5,
+      x: LANES[Math.floor(random() * LANES.length)] ?? 0,
+      color: CAR_COLORS[Math.floor(random() * CAR_COLORS.length)] ?? '#f5d90a',
+    })
+    toNext = 9 + random() * 12
+  }
+
+  return {
+    ...racer, x, speed, distance, curve, target, nextTurnAt, cars, toNext,
+    heading: racer.heading + curve * speed * 0.6,
+    lean: racer.lean === 0 ? 0 : racer.lean - Math.sign(racer.lean),
+    isOver: isHit,
+  }
+}
+
+type Tile = { char: string; color: string | undefined }
+
+function toSegments(cells: readonly Tile[]): Segment[] {
+  const row: Segment[] = []
+  for (const cell of cells) {
+    const last = row[row.length - 1]
+    if (last && last.color === cell.color) last.text += cell.char
+    else row.push({ text: cell.char, color: cell.color })
+  }
+
+  return row
+}
+
+/** La scène vue du cockpit : ciel, montagnes, route en perspective, voitures, capot. */
+export function racerRows(racer: Racer): Segment[][] {
+  const width = racer.width
+  const rows: Tile[][] = []
+  const put = (row: number, from: number, text: string, color: string) => {
+    const cells = rows[row]
+    if (!cells) return
+    for (let i = 0; i < text.length; i++) {
+      const char = text[i]
+      const at = from + i
+      if (char !== undefined && char !== ' ' && at >= 0 && at < width) cells[at] = { char, color }
+    }
+  }
+
+  for (let sky = 0; sky < SKY_ROWS; sky++) {
+    const cells: Tile[] = []
+    for (let i = 0; i < width; i++) {
+      if (sky === SKY_ROWS - 1) {
+        cells.push({ char: RIDGE[mod(i + Math.round(racer.heading * 2), RIDGE.length)] ?? '▁', color: '#5b7a99' })
+      } else {
+        const isStar = sky === 0 && mod(i * 7 + Math.round(racer.heading), 23) === 3
+        cells.push({ char: isStar ? '·' : ' ', color: undefined })
+      }
+    }
+    rows.push(cells)
+  }
+
+  // La route : chaque ligne plus bas est plus proche, donc plus large.
+  const shape: { center: number; half: number }[] = []
+  for (let i = 0; i < ROAD_ROWS; i++) {
+    const near = (i + 1) / ROAD_ROWS
+    const half = near * width * 0.42
+    const center = width / 2 + racer.curve * (1 - near) * (1 - near) * width * 0.55 - racer.x * half * 0.9
+    const band = mod(Math.floor(racer.distance * 0.8 + (1 / near) * 1.6), 2)
+    const edge = Math.max(1, near * 2.2)
+    const cells: Tile[] = []
+    for (let i2 = 0; i2 < width; i2++) {
+      const off = Math.abs(i2 + 0.5 - center)
+      if (off > half) cells.push({ char: band ? '▒' : '░', color: '#2f7d3b' })
+      else if (off > half - edge) cells.push({ char: '█', color: band ? '#e5484d' : '#e8e8e8' })
+      else if (band === 0 && off <= 0.5) cells.push({ char: '┊', color: '#e8e8e8' })
+      else if (band === 0 && Math.abs(off - half * 0.36) < 0.5) cells.push({ char: '·', color: '#9a9a9a' })
+      else cells.push({ char: ' ', color: undefined })
+    }
+    rows.push(cells)
+    shape.push({ center, half })
+  }
+
+  // Les voitures, de la plus lointaine à la plus proche.
+  for (const car of [...racer.cars].sort((a, b) => b.z - a.z)) {
+    const near = Math.min(1, 1 / car.z)
+    const i = bound(Math.round(near * ROAD_ROWS) - 1, 0, ROAD_ROWS - 1)
+    const at = shape[i]
+    if (!at) continue
+    const size = Math.max(1, Math.round(near * 8))
+    const body = size === 1 ? '▪' : size === 2 ? '▟▙' : `▟${'█'.repeat(size - 2)}▙`
+    const left = Math.floor(at.center + car.x * at.half * 0.9 - size / 2)
+    if (size >= 4) put(SKY_ROWS + i - 1, left + 1, '▄'.repeat(size - 2), car.color)
+    put(SKY_ROWS + i, left, body, car.color)
+  }
+
+  const hood = Math.max(10, Math.round(width * 0.4))
+  const wing = Math.floor((hood - 5) / 2)
+  rows.push(Array.from({ length: width }, (): Tile => ({ char: ' ', color: undefined })))
+  put(
+    SKY_ROWS + ROAD_ROWS,
+    Math.floor((width - hood) / 2) + Math.sign(racer.lean),
+    `▟${'▀'.repeat(wing)}(┼)${'▀'.repeat(hood - 5 - wing)}▙`,
+    racer.isOver ? '#e5484d' : '#7dd3fc',
+  )
+
+  return rows.map(toSegments)
+}
+
 // ---------- Frappe ----------
 
 export function newTyping(previous = '', random: () => number = Math.random): Typing {
@@ -390,8 +566,8 @@ function currentGame(state: State, props: GameProps): GameId {
 /** Tab : snake, frappe, course, puis le tamagotchi s'il est activé. */
 function nextGame(game: GameId, props: GameProps): GameId {
   const order: GameId[] = props.pet === null
-    ? ['snake', 'typing', 'runner']
-    : ['snake', 'typing', 'runner', 'pet']
+    ? ['snake', 'typing', 'runner', 'racer']
+    : ['snake', 'typing', 'runner', 'racer', 'pet']
 
   return order[(order.indexOf(game) + 1) % order.length] ?? 'snake'
 }
@@ -414,6 +590,7 @@ function initialState(props: GameProps): State {
     snake: newSnake(props.columns),
     typing: newTyping(),
     runner: newRunner(props.columns),
+    racer: newRacer(props.columns),
   }
 }
 
@@ -437,6 +614,14 @@ function onTick(surface: ClientSurface<State>): void {
     const runner = stepRunner(state.runner)
     if (runner.isOver) surface.post({ game: 'runner', score: runnerScore(runner) })
     surface.setState({ ...state, runner })
+  } else if (
+    currentGame(state, latest) === 'racer' &&
+    state.isStarted && !state.isPaused && !latest.isCovered && !state.racer.isOver
+  ) {
+    if (ticks % 2 !== 0) return
+    const racer = stepRacer(state.racer)
+    if (racer.isOver) surface.post({ game: 'racer', score: racerScore(racer) })
+    surface.setState({ ...state, racer })
   } else if (ticks % (currentGame(state, latest) === 'pet' ? 6 : 12) === 0) {
     surface.setState({ ...state }) // fait avancer les durées affichées
   }
@@ -458,6 +643,7 @@ function onKey(surface: ClientSurface<State>, event: ClientKeyEvent): void {
       snake: newSnake(latest.columns),
       typing: newTyping(state.typing.text),
       runner: newRunner(latest.columns),
+      racer: newRacer(latest.columns),
     })
 
     return
@@ -489,6 +675,22 @@ function onKey(surface: ClientSurface<State>, event: ClientKeyEvent): void {
   }
   if (!state.isStarted) {
     if (key === ' ') surface.setState({ ...state, isStarted: true })
+
+    return
+  }
+
+  if (game === 'racer') {
+    const { racer } = state
+    const pressed = key.toLowerCase()
+    if (pressed === 'p') {
+      if (!racer.isOver) surface.setState({ ...state, isPaused: !state.isPaused })
+    } else if (pressed === 'return' || pressed === 'r') {
+      if (racer.isOver) surface.setState({ ...state, isPaused: false, racer: newRacer(latest.columns) })
+    } else if (!state.isPaused && (pressed === 'left' || pressed === 'q' || pressed === 'a')) {
+      surface.setState({ ...state, racer: steer(racer, -1) })
+    } else if (!state.isPaused && (pressed === 'right' || pressed === 'd')) {
+      surface.setState({ ...state, racer: steer(racer, 1) })
+    }
 
     return
   }
@@ -655,6 +857,33 @@ const Game: ClientModule<GameProps, State> = (props, surface) => {
         </Box>
         <Text bold>[Espace] caresser  [F] friandise  [J] jouer  [N] nettoyer</Text>
         <Text dimColor>Tab : autre jeu · Échap : sortir</Text>
+      </Box>
+    )
+  }
+
+  if (game === 'racer') {
+    const { racer } = state
+    const score = racerScore(racer)
+    const record = Math.max(props.best.racer, racer.isOver ? score : 0)
+    const isOffRoad = Math.abs(racer.x) > 1
+    const help = !state.isStarted ? start
+      : racer.isOver ? <Text bold>💥 Accrochage ! Entrée pour repartir · Tab : autre jeu</Text>
+      : state.isPaused || props.isCovered ? <Text bold>⏸  Pause — P pour reprendre</Text>
+      : isOffRoad ? <Text bold color="yellow">Dans l'herbe ! Reviens sur la route</Text>
+      : <Text dimColor>← → ou Q D : tourner · P : pause · Tab : autre jeu · Échap : sortir</Text>
+
+    return (
+      <Box flexDirection="column">
+        <Text>🏎  Bolide   Score {score}   Record {record}   {Math.round(racer.speed * 140)} km/h</Text>
+        {banner}
+        <Text>╭{'─'.repeat(racer.width)}╮</Text>
+        {racerRows(racer).map(row => (
+          <Text>
+            │{row.map(one => (one.color === undefined ? one.text : <Text color={one.color}>{one.text}</Text>))}│
+          </Text>
+        ))}
+        <Text>╰{'─'.repeat(racer.width)}╯</Text>
+        {help}
       </Box>
     )
   }

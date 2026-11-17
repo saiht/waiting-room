@@ -1,6 +1,6 @@
 {
   "name": "waiting-room",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "De quoi patienter pendant que Claude travaille : mini-jeux, tamagotchi et animation dans la barre de statut.",
   "author": {
     "name": "Saiht"
@@ -11,12 +11,13 @@
     "game": {
       "type": "string",
       "title": "Jeu",
-      "description": "Ce qui s'ouvre pendant l'attente : un jeu fixe, un tirage au sort par jour (snake, frappe ou course), le tamagotchi, ou rien.",
+      "description": "Ce qui s'ouvre pendant l'attente : un jeu fixe, un tirage au sort par jour (snake, frappe, course d'obstacles ou course auto), le tamagotchi, ou rien.",
       "options": [
         "random-daily",
         "snake",
         "typing",
         "runner",
+        "racer",
         "pet",
         "off"
       ],

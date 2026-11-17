@@ -1,6 +1,6 @@
 import { expect, mock, test } from 'claude-code/testing'
 
-import { jump, newRunner, newSnake, newTyping, runnerRows, runnerScore, step, stepRunner, turn, typeKey, wordsPerMinute, wrap } from '../hooks/game'
+import { jump, newRacer, newRunner, newSnake, newTyping, racerRows, runnerRows, runnerScore, steer, step, stepRacer, stepRunner, turn, typeKey, wordsPerMinute, wrap } from '../hooks/game'
 import { age, clean, feed, gauge, moodOf, newPet, play, restorePet, stageOf, stroke, sulk, treat, viewOf } from '../hooks/pet'
 import { formatDuration, pickDaily } from '../hooks/register'
 
@@ -363,5 +363,56 @@ test('course : Espace démarre puis fait sauter ; sans sauter, on finit dans un 
   expect(await shown(ui, /Aïe/)).toBe(true)
   await ui.key({ key: 'return' })
   expect(await shown(ui, /sauter/)).toBe(true)
+  await ui.unmount()
+})
+
+test('logique de la course auto', () => {
+  const never = () => 0.5
+  const racer = newRacer(60)
+  expect(racer.width).toBe(56)
+
+  // le volant, borné, et sans effet une fois accidenté
+  expect(steer(racer, 1).x).toBe(0.14)
+  expect(steer({ ...racer, x: 1.45 }, 1).x).toBe(1.5)
+  expect(steer({ ...racer, isOver: true }, 1).x).toBe(0)
+
+  // elle accélère sur la route, ralentit dans l'herbe
+  expect(stepRacer(racer, never).speed > racer.speed).toBe(true)
+  expect(stepRacer({ ...racer, x: 1.3, speed: 1 }, never).speed).toBe(0.9)
+
+  // un virage à droite déporte vers la gauche
+  expect(stepRacer({ ...racer, curve: 0.8, target: 0.8, speed: 1 }, never).x < 0).toBe(true)
+
+  // une voiture à notre hauteur : accident sur la même file, dépassement sur une autre
+  const close = { ...racer, speed: 1, cars: [{ z: 1.1, x: 0, color: 'red' }] }
+  expect(stepRacer(close, never).isOver).toBe(true)
+  const passing = stepRacer({ ...close, x: 0.62 }, never)
+  expect(passing.isOver).toBe(false)
+  let gone = passing
+  for (let i = 0; i < 6; i++) gone = stepRacer(gone, never)
+  expect(gone.cars.length).toBe(0)
+
+  // une nouvelle voiture apparaît au loin
+  expect(stepRacer({ ...racer, toNext: 0.1 }, never).cars[0]?.z).toBe(8.5)
+
+  // la scène : 12 lignes de la bonne largeur, avec le capot et son volant
+  const rows = racerRows({ ...close, curve: 0.5 }).map(row => row.map(one => one.text).join(''))
+  expect(rows.length).toBe(12)
+  expect(rows.every(row => row.length === 56)).toBe(true)
+  expect(rows.at(-1)).toContain('(┼)')
+})
+
+test('course auto : Espace démarre, le volant mène dans l\'herbe si on insiste', { options: { game: 'racer' } }, async ($, on) => {
+  mock.clock(on)
+  mock.store(on)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await shown(ui, /Bolide/)).toBe(true)
+  expect(await shown(ui, /Espace pour démarrer/)).toBe(true)
+  await ui.key({ key: ' ' })
+  expect(await shown(ui, /tourner/)).toBe(true)
+  for (let i = 0; i < 9; i++) await ui.key({ key: 'left' })
+  expect(await shown(ui, /Dans l'herbe/)).toBe(true)
+  await ui.key({ key: 'p' })
+  expect(await shown(ui, /Pause/)).toBe(true)
   await ui.unmount()
 })
